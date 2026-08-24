@@ -1,107 +1,149 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { ServerConfig, ProxyConfig, AppConfig, LogEntry, FrpVersion, ProcessStatus } from '@/types';
+import type { FrpConfig, ProxyConfig, ProcessStatus, LogEntry } from '@/types';
+import { invoke } from '@tauri-apps/api/core';
 
 export const useAppStore = defineStore('app', () => {
-  // 应用配置
-  const config = ref<AppConfig>({
-    language: 'zh-CN',
-    theme: 'auto',
-    frpBinaryPath: '',
-    configPath: '',
-    logPath: '',
-    autoStart: false,
-    minimizeToTray: true,
-    closeToTray: true,
-    checkUpdateOnStart: true,
-    downloadMirror: 'auto',
-  });
-
-  // 服务器列表
-  const servers = ref<ServerConfig[]>([]);
+  // 应用状态
+  const theme = ref<'light' | 'dark' | 'auto'>('auto');
+  const language = ref<'zh-CN' | 'en-US'>('zh-CN');
   
-  // 代理列表
-  const proxies = ref<ProxyConfig[]>([]);
-  
-  // FRP 版本列表
-  const versions = ref<FrpVersion[]>([]);
-  
-  // 当前选中的服务器 ID
-  const selectedServerId = ref<string | null>(null);
-  
-  // 日志列表
-  const logs = ref<LogEntry[]>([]);
+  // FRP 配置
+  const frpConfig = ref<FrpConfig | null>(null);
   
   // 进程状态
-  const processStatus = ref<Record<string, ProcessStatus>>({});
-
+  const processStatus = ref<ProcessStatus>({
+    running: false,
+    pid: null,
+    state: 'stopped',
+  });
+  
+  // 日志
+  const logs = ref<LogEntry[]>([]);
+  const autoScrollLogs = ref(true);
+  
   // 计算属性
-  const currentServer = computed(() => 
-    servers.value.find(s => s.id === selectedServerId.value)
-  );
-
-  const activeProxies = computed(() => 
-    proxies.value.filter(p => p.enabled)
-  );
-
-  const runningServersCount = computed(() => 
-    servers.value.filter(s => {
-      const status = processStatus.value[s.id];
-      return status?.running;
-    }).length
-  );
-
+  const isRunning = computed(() => processStatus.value.running);
+  const activeProxiesCount = computed(() => {
+    if (!frpConfig.value) return 0;
+    return frpConfig.value.proxies.filter(p => p.enabled).length;
+  });
+  
   // 方法
-  function setLanguage(lang: 'zh-CN' | 'en-US') {
-    config.value.language = lang;
-    // 这里可以同步到后端
+  function setTheme(newTheme: 'light' | 'dark' | 'auto') {
+    theme.value = newTheme;
+    applyTheme(newTheme);
   }
-
-  function setTheme(theme: 'light' | 'dark' | 'auto') {
-    config.value.theme = theme;
-    applyTheme(theme);
-  }
-
-  function applyTheme(theme: 'light' | 'dark' | 'auto') {
+  
+  function applyTheme(newTheme: 'light' | 'dark' | 'auto') {
     const root = document.documentElement;
-    if (theme === 'auto') {
+    if (newTheme === 'auto') {
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       root.classList.toggle('dark', prefersDark);
     } else {
-      root.classList.toggle('dark', theme === 'dark');
+      root.classList.toggle('dark', newTheme === 'dark');
     }
   }
-
-  function addServer(server: ServerConfig) {
-    servers.value.push(server);
+  
+  function setLanguage(lang: 'zh-CN' | 'en-US') {
+    language.value = lang;
   }
-
-  function updateServer(id: string, updates: Partial<ServerConfig>) {
-    const index = servers.value.findIndex(s => s.id === id);
-    if (index !== -1) {
-      servers.value[index] = { ...servers.value[index], ...updates, updatedAt: Date.now() };
+  
+  async function loadConfig() {
+    try {
+      const result = await invoke<ConfigResponse>('load_config');
+      if (result.success && result.config) {
+        frpConfig.value = result.config;
+      }
+    } catch (error) {
+      console.error('Failed to load config:', error);
     }
   }
-
-  function deleteServer(id: string) {
-    servers.value = servers.value.filter(s => s.id !== id);
-  }
-
-  function addProxy(proxy: ProxyConfig) {
-    proxies.value.push(proxy);
-  }
-
-  function updateProxy(id: string, updates: Partial<ProxyConfig>) {
-    const index = proxies.value.findIndex(p => p.name === id);
-    if (index !== -1) {
-      proxies.value[index] = { ...proxies.value[index], ...updates, updatedAt: Date.now() };
+  
+  async function saveConfig(config: FrpConfig) {
+    try {
+      const result = await invoke<ConfigResponse>('save_config', { config });
+      if (result.success && result.config) {
+        frpConfig.value = result.config;
+        return { success: true };
+      }
+      return { success: false, error: result.error };
+    } catch (error) {
+      return { success: false, error: String(error) };
     }
   }
-
-  function deleteProxy(name: string) {
-    proxies.value = proxies.value.filter(p => p.name !== name);
+  
+  async function startFRP() {
+    if (!frpConfig.value) {
+      return { success: false, error: '没有配置' };
+    }
+    
+    try {
+      await invoke<boolean>('start_frp', { config: frpConfig.value });
+      await refreshProcessStatus();
+      addLog({
+        timestamp: Date.now(),
+        level: 'info',
+        message: 'FRP 进程已启动',
+        source: 'app',
+      });
+      return { success: true };
+    } catch (error) {
+      addLog({
+        timestamp: Date.now(),
+        level: 'error',
+        message: `启动 FRP 失败：${error}`,
+        source: 'app',
+      });
+      return { success: false, error: String(error) };
+    }
   }
-
+  
+  async function stopFRP() {
+    try {
+      await invoke<boolean>('stop_frp');
+      await refreshProcessStatus();
+      addLog({
+        timestamp: Date.now(),
+        level: 'info',
+        message: 'FRP 进程已停止',
+        source: 'app',
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  }
+  
+  async function restartFRP() {
+    if (!frpConfig.value) {
+      return { success: false, error: '没有配置' };
+    }
+    
+    try {
+      await invoke<boolean>('restart_frp', { config: frpConfig.value });
+      await refreshProcessStatus();
+      addLog({
+        timestamp: Date.now(),
+        level: 'info',
+        message: 'FRP 进程已重启',
+        source: 'app',
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  }
+  
+  async function refreshProcessStatus() {
+    try {
+      const status = await invoke<ProcessStatus>('get_process_status');
+      processStatus.value = status;
+    } catch (error) {
+      console.error('Failed to get process status:', error);
+    }
+  }
+  
   function addLog(entry: LogEntry) {
     logs.value.push(entry);
     // 限制日志数量
@@ -109,73 +151,43 @@ export const useAppStore = defineStore('app', () => {
       logs.value = logs.value.slice(-500);
     }
   }
-
+  
   function clearLogs() {
     logs.value = [];
   }
-
-  function updateProcessStatus(serverId: string, status: ProcessStatus) {
-    processStatus.value[serverId] = status;
+  
+  // 初始化
+  function init() {
+    applyTheme(theme.value);
+    // 定期刷新进程状态
+    setInterval(refreshProcessStatus, 5000);
   }
-
-  function addVersion(version: FrpVersion) {
-    const exists = versions.value.find(v => v.version === version.version);
-    if (!exists) {
-      versions.value.push(version);
-    }
-  }
-
-  function deleteVersion(version: string) {
-    versions.value = versions.value.filter(v => v.version !== version);
-  }
-
-  // 加载配置
-  async function loadConfig() {
-    // TODO: 从后端加载配置
-    try {
-      // const loaded = await invoke('load_config');
-      // config.value = loaded;
-      applyTheme(config.value.theme);
-    } catch (error) {
-      console.error('Failed to load config:', error);
-    }
-  }
-
-  // 保存配置
-  async function saveConfig() {
-    // TODO: 保存到后端
-    try {
-      // await invoke('save_config', { config: config.value });
-    } catch (error) {
-      console.error('Failed to save config:', error);
-    }
-  }
-
+  
   return {
-    config,
-    servers,
-    proxies,
-    versions,
-    selectedServerId,
-    logs,
+    theme,
+    language,
+    frpConfig,
     processStatus,
-    currentServer,
-    activeProxies,
-    runningServersCount,
-    setLanguage,
+    logs,
+    autoScrollLogs,
+    isRunning,
+    activeProxiesCount,
     setTheme,
-    addServer,
-    updateServer,
-    deleteServer,
-    addProxy,
-    updateProxy,
-    deleteProxy,
-    addLog,
-    clearLogs,
-    updateProcessStatus,
-    addVersion,
-    deleteVersion,
+    setLanguage,
     loadConfig,
     saveConfig,
+    startFRP,
+    stopFRP,
+    restartFRP,
+    refreshProcessStatus,
+    addLog,
+    clearLogs,
+    init,
   };
 });
+
+interface ConfigResponse {
+  success: boolean;
+  config: FrpConfig | null;
+  error: string | null;
+}

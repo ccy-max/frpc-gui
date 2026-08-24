@@ -39,6 +39,10 @@ once_cell = "1"
 thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
 
+# Unix 系统信号支持
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.27", features = ["signal"] }
+
 [profile.release]
 panic = "abort"
 codegen-units = 1
