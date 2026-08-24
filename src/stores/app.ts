@@ -27,12 +27,16 @@ export const useAppStore = defineStore('app', () => {
 
   // 日志
   const logs = ref<LogEntry[]>([]);
+  const frpcLogContent = ref('');
   const autoScrollLogs = ref(true);
 
   // 服务器和代理列表
   const servers = ref<any[]>([]);
   const proxies = ref<any[]>([]);
   const versions = ref<any[]>([]);
+  const downloadedVersions = ref<any[]>([]);
+  const localPorts = ref<any[]>([]);
+  const mirrors = ref<any[]>([]);
 
   // 计算属性
   const isRunning = computed(() => processStatus.value.running);
@@ -44,7 +48,6 @@ export const useAppStore = defineStore('app', () => {
   const activeProxiesCount = computed(() => activeProxies.value.length);
 
   // ===== 设置持久化 =====
-
   async function loadSettings() {
     try {
       const s = await invoke<any>('load_settings');
@@ -81,7 +84,6 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  // ===== 主题 =====
   function setTheme(t: 'light' | 'dark' | 'auto') {
     theme.value = t;
     applyTheme(t);
@@ -105,36 +107,48 @@ export const useAppStore = defineStore('app', () => {
 
   // ===== 文件选择 =====
   async function pickFrpcPath() {
-    const selected = await openDialog({
-      title: '选择 frpc 可执行文件',
-      filters: [{ name: '可执行文件', extensions: ['exe'] }],
-    });
-    if (selected) {
-      frpcPath.value = selected as string;
-      saveSettings();
+    try {
+      const selected = await openDialog({
+        title: '选择 frpc 可执行文件',
+        filters: [{ name: '可执行文件', extensions: ['exe'] }],
+      });
+      if (selected) {
+        frpcPath.value = selected as string;
+        await saveSettings();
+      }
+    } catch (e) {
+      console.error('Failed to pick frpc path:', e);
     }
   }
 
   async function pickConfigPath() {
-    const selected = await saveDialog({
-      title: '选择配置文件保存位置',
-      defaultPath: 'frpc.toml',
-      filters: [{ name: 'TOML 配置', extensions: ['toml'] }],
-    });
-    if (selected) {
-      configPath.value = selected as string;
-      saveSettings();
+    try {
+      const selected = await saveDialog({
+        title: '选择配置文件保存位置',
+        defaultPath: 'frpc.toml',
+        filters: [{ name: 'TOML 配置', extensions: ['toml'] }],
+      });
+      if (selected) {
+        configPath.value = selected as string;
+        await saveSettings();
+      }
+    } catch (e) {
+      console.error('Failed to pick config path:', e);
     }
   }
 
   async function pickLogPath() {
-    const selected = await openDialog({
-      title: '选择日志目录',
-      directory: true,
-    });
-    if (selected) {
-      logPath.value = selected as string;
-      saveSettings();
+    try {
+      const selected = await openDialog({
+        title: '选择日志目录',
+        directory: true,
+      });
+      if (selected) {
+        logPath.value = selected as string;
+        await saveSettings();
+      }
+    } catch (e) {
+      console.error('Failed to pick log path:', e);
     }
   }
 
@@ -164,6 +178,39 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function resetAllConfig() {
+    try {
+      await invoke<boolean>('reset_all_config');
+      frpConfig.value = null;
+      proxies.value = [];
+      servers.value = [];
+      logs.value = [];
+      versions.value = [];
+      frpcPath.value = '';
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  }
+
+  async function importTomlConfig() {
+    try {
+      const selected = await openDialog({
+        title: '选择 frpc.toml 文件',
+        filters: [{ name: 'TOML 配置', extensions: ['toml'] }],
+      });
+      if (selected) {
+        const config = await invoke<any>('import_toml_config', { tomlPath: selected as string });
+        frpConfig.value = config;
+        proxies.value = config.proxies || [];
+        return { success: true };
+      }
+      return { success: false, error: 'canceled' };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  }
+
   // ===== 服务器管理 =====
   function addServer(data: any) { servers.value.push(data); }
   function updateServer(id: string, updates: any) {
@@ -188,6 +235,16 @@ export const useAppStore = defineStore('app', () => {
   function deleteProxy(name: string) {
     proxies.value = proxies.value.filter(p => p.name !== name);
     if (frpConfig.value) frpConfig.value.proxies = frpConfig.value.proxies.filter(p => p.name !== name);
+  }
+
+  async function modifyProxyStatus(name: string, enabled: boolean) {
+    try {
+      await invoke<boolean>('modify_proxy_status', { proxyName: name, enabled });
+      updateProxy(name, { enabled });
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
   }
 
   // ===== FRP 进程控制 =====
@@ -222,11 +279,35 @@ export const useAppStore = defineStore('app', () => {
     } catch (e) { return { success: false, error: String(e) }; }
   }
 
+  async function reloadFRP() {
+    if (!frpConfig.value) return { success: false, error: '没有配置' };
+    try {
+      await invoke<boolean>('reload_frp', { config: frpConfig.value });
+      addLog({ timestamp: Date.now(), level: 'info', message: '配置已热重载', source: 'app' });
+      return { success: true };
+    } catch (e) { return { success: false, error: String(e) }; }
+  }
+
   async function refreshProcessStatus() {
     try {
-      const status = await invoke<ProcessStatus>('get_process_status');
-      processStatus.value = status;
+      const status = await invoke<any>('get_process_status');
+      processStatus.value = {
+        running: status.running,
+        pid: status.pid,
+        state: status.state,
+      };
     } catch (e) { console.error('Failed to get process status:', e); }
+  }
+
+  async function detectFrpcProcess() {
+    try {
+      const found = await invoke<boolean>('detect_frpc_process');
+      if (found) {
+        await refreshProcessStatus();
+        addLog({ timestamp: Date.now(), level: 'info', message: '检测到运行中的 FRP 进程', source: 'app' });
+      }
+      return found;
+    } catch (e) { return false; }
   }
 
   // ===== 日志 =====
@@ -236,6 +317,25 @@ export const useAppStore = defineStore('app', () => {
   }
   function clearLogs() { logs.value = []; }
 
+  async function loadFrpcLogContent() {
+    try {
+      const content = await invoke<string>('get_frpc_log_content');
+      frpcLogContent.value = content;
+      return content;
+    } catch (e) {
+      console.error('Failed to load frpc log:', e);
+      return '';
+    }
+  }
+
+  async function openFrpcLogFile() {
+    try {
+      await invoke<boolean>('open_frpc_log_file');
+    } catch (e) {
+      console.error('Failed to open log file:', e);
+    }
+  }
+
   // ===== FRP 版本管理 =====
   async function loadVersions() {
     try {
@@ -244,6 +344,15 @@ export const useAppStore = defineStore('app', () => {
     } catch (e) {
       console.error('Failed to load versions:', e);
       versions.value = [];
+    }
+  }
+
+  async function loadDownloadedVersions() {
+    try {
+      const list = await invoke<any[]>('get_downloaded_versions');
+      downloadedVersions.value = list || [];
+    } catch (e) {
+      console.error('Failed to load downloaded versions:', e);
     }
   }
 
@@ -265,6 +374,65 @@ export const useAppStore = defineStore('app', () => {
     } catch (e) { return { success: false, error: String(e) }; }
   }
 
+  async function loadMirrors() {
+    try {
+      mirrors.value = await invoke<any[]>('get_mirrors');
+    } catch (e) {
+      console.error('Failed to load mirrors:', e);
+    }
+  }
+
+  async function importLocalFrpc() {
+    try {
+      const selected = await openDialog({
+        title: '选择 frpc 压缩包',
+        filters: [
+          { name: '压缩包', extensions: ['zip'] },
+          { name: 'tar.gz', extensions: ['gz'] },
+        ],
+      });
+      if (selected) {
+        const path = await invoke<string>('import_local_frpc', { filePath: selected as string });
+        frpcPath.value = path;
+        await saveSettings();
+        return { success: true, path };
+      }
+      return { success: false, error: 'canceled' };
+    } catch (e) { return { success: false, error: String(e) }; }
+  }
+
+  // ===== 系统操作 =====
+  async function openUrl(url: string) {
+    try { await invoke<boolean>('open_url', { url }); } catch (e) { console.error(e); }
+  }
+
+  async function relaunchApp() {
+    try { await invoke<boolean>('relaunch_app'); } catch (e) { console.error(e); }
+  }
+
+  async function openAppData() {
+    try { await invoke<boolean>('open_app_data'); } catch (e) { console.error(e); }
+  }
+
+  async function checkAppUpdate() {
+    try {
+      const version = await invoke<string>('check_app_update');
+      return version;
+    } catch (e) {
+      console.error('Failed to check update:', e);
+      return null;
+    }
+  }
+
+  async function loadLocalPorts() {
+    try {
+      localPorts.value = await invoke<any[]>('get_local_ports');
+    } catch (e) {
+      console.error('Failed to load local ports:', e);
+      localPorts.value = [];
+    }
+  }
+
   // ===== 初始化 =====
   let statusTimer: ReturnType<typeof setInterval> | null = null;
   function init() {
@@ -273,22 +441,35 @@ export const useAppStore = defineStore('app', () => {
       statusTimer = setInterval(refreshProcessStatus, 5000);
     }
     loadSettings();
+    loadMirrors();
   }
 
   return {
+    // State
     theme, language, frpcPath, configPath, logPath,
     autoStart, minimizeToTray, closeToTray,
-    frpConfig, processStatus, logs, autoScrollLogs,
-    servers, proxies, versions,
+    frpConfig, processStatus, logs, frpcLogContent, autoScrollLogs,
+    servers, proxies, versions, downloadedVersions, localPorts, mirrors,
+    // Getters
     isRunning, runningServersCount, activeProxies, activeProxiesCount,
+    // Settings
     setTheme, setLanguage, loadSettings, saveSettings,
     pickFrpcPath, pickConfigPath, pickLogPath,
-    loadConfig, saveConfig,
+    // Config
+    loadConfig, saveConfig, resetAllConfig, importTomlConfig,
+    // Server/Proxy
     addServer, updateServer, deleteServer,
-    addProxy, updateProxy, deleteProxy,
-    startFRP, stopFRP, restartFRP, refreshProcessStatus,
-    addLog, clearLogs,
-    loadVersions, downloadVersion, deleteVersion,
+    addProxy, updateProxy, deleteProxy, modifyProxyStatus,
+    // Process
+    startFRP, stopFRP, restartFRP, reloadFRP, refreshProcessStatus, detectFrpcProcess,
+    // Logs
+    addLog, clearLogs, loadFrpcLogContent, openFrpcLogFile,
+    // Versions
+    loadVersions, loadDownloadedVersions, downloadVersion, deleteVersion,
+    loadMirrors, importLocalFrpc,
+    // System
+    openUrl, relaunchApp, openAppData, checkAppUpdate, loadLocalPorts,
+    // Init
     init,
   };
 });

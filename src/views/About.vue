@@ -1,5 +1,9 @@
 <script setup lang="ts">
+import { useAppStore } from '@/stores/app';
 import { StarOutlined } from '@ant-design/icons-vue';
+import { message } from 'ant-design-vue';
+
+const appStore = useAppStore();
 
 const packageInfo = {
   version: '0.1.0',
@@ -9,7 +13,16 @@ const packageInfo = {
 };
 
 function openUrl(url: string) {
-  window.open(url, '_blank');
+  appStore.openUrl(url);
+}
+
+async function checkUpdate() {
+  const version = await appStore.checkAppUpdate();
+  if (version) {
+    message.info(`最新版本：${version}`);
+  } else {
+    message.warning('检查更新失败');
+  }
 }
 </script>
 
@@ -28,26 +41,20 @@ function openUrl(url: string) {
         <a-descriptions-item label="许可证">{{ packageInfo.license }}</a-descriptions-item>
       </a-descriptions>
       <div class="links">
-        <a-button type="primary" :icon="h(StarOutlined)" @click="openUrl(packageInfo.github)">GitHub 仓库</a-button>
+        <a-space>
+          <a-button type="primary" @click="openUrl(packageInfo.github)">
+            <template #icon><StarOutlined /></template>
+            GitHub 仓库
+          </a-button>
+          <a-button @click="checkUpdate">检查更新</a-button>
+        </a-space>
       </div>
     </a-card>
   </div>
 </template>
 
-<script lang="ts">
-import { h } from 'vue';
-import { StarOutlined } from '@ant-design/icons-vue';
-export default { methods: { h } };
-</script>
-
 <style scoped lang="scss">
-.about-page {
-  padding: 24px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: calc(100vh - 60px);
-}
+.about-page { padding: 24px; display: flex; justify-content: center; align-items: center; height: calc(100vh - 60px); }
 .about-card { max-width: 500px; width: 100%; }
 .logo-section { text-align: center; padding: 24px 0; }
 .app-name { font-size: 28px; font-weight: 700; margin: 0 0 8px; }

@@ -5,19 +5,13 @@ import { PlusOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 
 const appStore = useAppStore();
-
 const modalVisible = ref(false);
-const form = ref<any>({
-  name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 8080, remote_port: 8080, enabled: true,
-});
+const form = ref<any>({ name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: '8080', remote_port: '8080', enabled: true });
 
 const proxyTypes = [
-  { value: 'tcp', label: 'TCP' },
-  { value: 'udp', label: 'UDP' },
-  { value: 'http', label: 'HTTP' },
-  { value: 'https', label: 'HTTPS' },
-  { value: 'stcp', label: 'STCP' },
-  { value: 'xtcp', label: 'XTCP' },
+  { value: 'tcp', label: 'TCP' }, { value: 'udp', label: 'UDP' },
+  { value: 'http', label: 'HTTP' }, { value: 'https', label: 'HTTPS' },
+  { value: 'stcp', label: 'STCP' }, { value: 'xtcp', label: 'XTCP' },
 ];
 
 const columns = [
@@ -30,15 +24,12 @@ const columns = [
 ];
 
 function openAdd() {
-  form.value = { name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 8080, remote_port: 8080, enabled: true };
+  form.value = { name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: '8080', remote_port: '8080', enabled: true };
   modalVisible.value = true;
 }
 
 function handleSave() {
-  if (!form.value.name) {
-    message.warning('请输入代理名称');
-    return;
-  }
+  if (!form.value.name) { message.warning('请输入代理名称'); return; }
   appStore.addProxy(form.value);
   message.success('保存成功');
   modalVisible.value = false;
@@ -46,14 +37,13 @@ function handleSave() {
 
 function handleDelete(proxy: any) {
   Modal.confirm({
-    title: '确认删除',
-    content: `确定要删除代理 "${proxy.name}" 吗？`,
+    title: '确认删除', content: `确定要删除代理 "${proxy.name}" 吗？`,
     onOk: () => { appStore.deleteProxy(proxy.name); message.success('删除成功'); },
   });
 }
 
-function toggleProxy(proxy: any) {
-  appStore.updateProxy(proxy.name, { enabled: !proxy.enabled });
+async function toggleProxy(proxy: any) {
+  await appStore.modifyProxyStatus(proxy.name, !proxy.enabled);
   message.info(proxy.enabled ? '已停止' : '已启动');
 }
 
@@ -64,7 +54,10 @@ const proxies = computed(() => appStore.proxies);
   <div class="proxies-page">
     <div class="page-header">
       <h2 class="page-title">代理管理</h2>
-      <a-button type="primary" :icon="h(PlusOutlined)" @click="openAdd">添加代理</a-button>
+      <a-button type="primary" @click="openAdd">
+        <template #icon><PlusOutlined /></template>
+        添加代理
+      </a-button>
     </div>
 
     <a-table :data-source="proxies" :columns="columns" row-key="name" :pagination="false">
@@ -88,42 +81,22 @@ const proxies = computed(() => appStore.proxies);
 
     <a-modal v-model:open="modalVisible" title="添加代理" @ok="handleSave">
       <a-form :model="form" layout="vertical">
-        <a-form-item label="名称" required>
-          <a-input v-model:value="form.name" placeholder="请输入代理名称" />
-        </a-form-item>
+        <a-form-item label="名称" required><a-input v-model:value="form.name" placeholder="请输入代理名称" /></a-form-item>
         <a-form-item label="类型" required>
           <a-select v-model:value="form.type">
             <a-select-option v-for="t in proxyTypes" :key="t.value" :value="t.value">{{ t.label }}</a-select-option>
           </a-select>
         </a-form-item>
         <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="本地 IP">
-              <a-input v-model:value="form.local_ip" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="本地端口">
-              <a-input-number v-model:value="form.local_port" :min="1" :max="65535" style="width: 100%" />
-            </a-form-item>
-          </a-col>
+          <a-col :span="12"><a-form-item label="本地 IP"><a-input v-model:value="form.local_ip" /></a-form-item></a-col>
+          <a-col :span="12"><a-form-item label="本地端口"><a-input-number v-model:value="form.local_port" :min="1" :max="65535" style="width: 100%" /></a-form-item></a-col>
         </a-row>
-        <a-form-item label="远程端口">
-          <a-input-number v-model:value="form.remote_port" :min="1" :max="65535" style="width: 100%" />
-        </a-form-item>
-        <a-form-item label="启用">
-          <a-switch v-model:checked="form.enabled" />
-        </a-form-item>
+        <a-form-item label="远程端口"><a-input-number v-model:value="form.remote_port" :min="1" :max="65535" style="width: 100%" /></a-form-item>
+        <a-form-item label="启用"><a-switch v-model:checked="form.enabled" /></a-form-item>
       </a-form>
     </a-modal>
   </div>
 </template>
-
-<script lang="ts">
-import { h } from 'vue';
-import { PlusOutlined } from '@ant-design/icons-vue';
-export default { methods: { h } };
-</script>
 
 <style scoped lang="scss">
 .proxies-page { padding: 24px; height: calc(100vh - 60px); overflow-y: auto; }

@@ -9,13 +9,7 @@ const appStore = useAppStore();
 const modalVisible = ref(false);
 const editingId = ref<string | null>(null);
 const form = ref<any>({
-  id: '',
-  name: '',
-  serverAddr: '',
-  serverPort: 7000,
-  token: '',
-  tlsEnable: false,
-  enabled: true,
+  id: '', name: '', serverAddr: '', serverPort: 7000, token: '', tlsEnable: false, enabled: true,
 });
 
 const columns = [
@@ -73,7 +67,10 @@ const servers = computed(() => appStore.servers);
   <div class="servers-page">
     <div class="page-header">
       <h2 class="page-title">服务器管理</h2>
-      <a-button type="primary" :icon="h(PlusOutlined)" @click="openAdd">添加服务器</a-button>
+      <a-button type="primary" @click="openAdd">
+        <template #icon><PlusOutlined /></template>
+        添加服务器
+      </a-button>
     </div>
 
     <a-table :data-source="servers" :columns="columns" row-key="id" :pagination="false">
@@ -93,7 +90,6 @@ const servers = computed(() => appStore.servers);
 
     <a-empty v-if="servers.length === 0" description="暂无服务器配置" style="margin-top: 48px" />
 
-    <!-- 编辑/添加对话框 -->
     <a-modal v-model:open="modalVisible" :title="editingId ? '编辑服务器' : '添加服务器'" @ok="handleSave">
       <a-form :model="form" layout="vertical">
         <a-form-item label="名称" required>
@@ -119,28 +115,8 @@ const servers = computed(() => appStore.servers);
   </div>
 </template>
 
-<script lang="ts">
-import { h } from 'vue';
-import { PlusOutlined } from '@ant-design/icons-vue';
-export default { methods: { h } };
-</script>
-
 <style scoped lang="scss">
-.servers-page {
-  padding: 24px;
-  height: calc(100vh - 60px);
-  overflow-y: auto;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-}
+.servers-page { padding: 24px; height: calc(100vh - 60px); overflow-y: auto; }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.page-title { font-size: 24px; font-weight: 600; }
 </style>

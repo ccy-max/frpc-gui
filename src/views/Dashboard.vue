@@ -2,12 +2,7 @@
 import { computed } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter } from 'vue-router';
-import {
-  PlusOutlined,
-  PlayCircleOutlined,
-  FileTextOutlined,
-  SettingOutlined,
-} from '@ant-design/icons-vue';
+import { PlusOutlined, PlayCircleOutlined, FileTextOutlined, SettingOutlined } from '@ant-design/icons-vue';
 
 const appStore = useAppStore();
 const router = useRouter();
@@ -33,10 +28,9 @@ const columns = [
   <div class="dashboard">
     <h2 class="page-title">概览</h2>
 
-    <!-- 统计卡片 -->
     <a-row :gutter="16" class="stats-row">
       <a-col :span="6" v-for="(stat, index) in stats" :key="index">
-        <a-card class="stat-card" :bordered="true">
+        <a-card :bordered="true">
           <div class="stat-content">
             <div class="stat-value" :style="{ color: stat.color }">{{ stat.value }}</div>
             <div class="stat-label">{{ stat.title }}</div>
@@ -45,18 +39,28 @@ const columns = [
       </a-col>
     </a-row>
 
-    <!-- 快速操作 -->
-    <a-card title="快速启动" class="quick-start-card">
+    <a-card title="快速启动" style="margin-bottom: 16px">
       <a-space size="middle" wrap>
-        <a-button type="primary" :icon="h(PlusOutlined)">添加服务器</a-button>
-        <a-button type="primary" :icon="h(PlayCircleOutlined)" @click="appStore.startFRP()">启动 FRP</a-button>
-        <a-button :icon="h(FileTextOutlined)" @click="router.push('/logs')">查看日志</a-button>
-        <a-button :icon="h(SettingOutlined)" @click="router.push('/settings')">设置</a-button>
+        <a-button type="primary" @click="router.push('/servers')">
+          <template #icon><PlusOutlined /></template>
+          添加服务器
+        </a-button>
+        <a-button type="primary" @click="appStore.startFRP()">
+          <template #icon><PlayCircleOutlined /></template>
+          启动 FRP
+        </a-button>
+        <a-button @click="router.push('/logs')">
+          <template #icon><FileTextOutlined /></template>
+          查看日志
+        </a-button>
+        <a-button @click="router.push('/settings')">
+          <template #icon><SettingOutlined /></template>
+          设置
+        </a-button>
       </a-space>
     </a-card>
 
-    <!-- 最近日志 -->
-    <a-card title="最近日志" class="logs-card">
+    <a-card title="最近日志">
       <template #extra>
         <a-button type="link" size="small" @click="router.push('/logs')">查看全部</a-button>
       </template>
@@ -66,47 +70,11 @@ const columns = [
   </div>
 </template>
 
-<script lang="ts">
-import { h } from 'vue';
-import { PlusOutlined, PlayCircleOutlined, FileTextOutlined, SettingOutlined } from '@ant-design/icons-vue';
-export default { methods: { h } };
-</script>
-
 <style scoped lang="scss">
-.dashboard {
-  padding: 24px;
-  height: calc(100vh - 60px);
-  overflow-y: auto;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  margin-bottom: 24px;
-}
-
-.stats-row {
-  margin-bottom: 24px;
-}
-
-.stat-card {
-  text-align: center;
-}
-
-.stat-value {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1;
-  margin-bottom: 4px;
-}
-
-.stat-label {
-  font-size: 13px;
-  color: #8c8c8c;
-}
-
-.quick-start-card,
-.logs-card {
-  margin-bottom: 16px;
-}
+.dashboard { padding: 24px; height: calc(100vh - 60px); overflow-y: auto; }
+.page-title { font-size: 24px; font-weight: 600; margin-bottom: 24px; }
+.stats-row { margin-bottom: 24px; }
+.stat-content { text-align: center; }
+.stat-value { font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
+.stat-label { font-size: 13px; color: #8c8c8c; }
 </style>

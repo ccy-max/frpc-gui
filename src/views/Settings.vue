@@ -1,14 +1,31 @@
 <script setup lang="ts">
 import { useAppStore } from '@/stores/app';
 import { FolderOpenOutlined } from '@ant-design/icons-vue';
-import { message } from 'ant-design-vue';
-import { h } from 'vue';
+import { message, Modal } from 'ant-design-vue';
 
 const appStore = useAppStore();
 
 async function handleConfigChange() {
   await appStore.saveSettings();
   message.success('设置已保存');
+}
+
+function handleReset() {
+  Modal.confirm({
+    title: '确认清空',
+    content: '将清空所有配置、下载的 FRP 版本和日志。此操作不可恢复！',
+    okText: '确认清空',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: async () => {
+      const result = await appStore.resetAllConfig();
+      if (result.success) {
+        message.success('已清空所有配置');
+      } else {
+        message.error(`清空失败：${result.error}`);
+      }
+    },
+  });
 }
 </script>
 
@@ -54,8 +71,10 @@ async function handleConfigChange() {
                 placeholder="点击右侧按钮选择 frpc 可执行文件"
                 readonly
               >
-                <template #addonAfter>
-                  <a-button :icon="h(FolderOpenOutlined)" size="small" @click="appStore.pickFrpcPath()" type="text" />
+                <template #suffix>
+                  <a-button type="text" size="small" @click="appStore.pickFrpcPath()">
+                    <template #icon><FolderOpenOutlined /></template>
+                  </a-button>
                 </template>
               </a-input>
             </a-form-item>
@@ -65,8 +84,10 @@ async function handleConfigChange() {
                 placeholder="点击右侧按钮选择配置文件保存位置"
                 readonly
               >
-                <template #addonAfter>
-                  <a-button :icon="h(FolderOpenOutlined)" size="small" @click="appStore.pickConfigPath()" type="text" />
+                <template #suffix>
+                  <a-button type="text" size="small" @click="appStore.pickConfigPath()">
+                    <template #icon><FolderOpenOutlined /></template>
+                  </a-button>
                 </template>
               </a-input>
             </a-form-item>
@@ -76,12 +97,21 @@ async function handleConfigChange() {
                 placeholder="点击右侧按钮选择日志目录"
                 readonly
               >
-                <template #addonAfter>
-                  <a-button :icon="h(FolderOpenOutlined)" size="small" @click="appStore.pickLogPath()" type="text" />
+                <template #suffix>
+                  <a-button type="text" size="small" @click="appStore.pickLogPath()">
+                    <template #icon><FolderOpenOutlined /></template>
+                  </a-button>
                 </template>
               </a-input>
             </a-form-item>
           </a-form>
+        </a-card>
+
+        <a-card title="数据管理" style="margin-top: 16px">
+          <a-space direction="vertical" style="width: 100%">
+            <a-button block @click="appStore.openAppData()">打开数据目录</a-button>
+            <a-button block danger @click="handleReset">一键清空所有配置</a-button>
+          </a-space>
         </a-card>
       </a-col>
     </a-row>

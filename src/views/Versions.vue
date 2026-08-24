@@ -2,8 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { message } from 'ant-design-vue';
-import { ReloadOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons-vue';
-import { h } from 'vue';
+import { ReloadOutlined, DownloadOutlined, DeleteOutlined, ImportOutlined } from '@ant-design/icons-vue';
 
 const appStore = useAppStore();
 const loading = ref(false);
@@ -31,7 +30,7 @@ async function download(record: any) {
   const result = await appStore.downloadVersion(record.version, record.download_url);
   message.destroy();
   if (result.success) {
-    message.success(`下载成功！frpc 路径：${result.path}`);
+    message.success(`下载成功！路径：${result.path}`);
   } else {
     message.error(`下载失败：${result.error}`);
   }
@@ -40,23 +39,36 @@ async function download(record: any) {
 
 async function remove(record: any) {
   const result = await appStore.deleteVersion(record.version);
+  if (result.success) { message.success('已删除'); } else { message.error(`删除失败：${result.error}`); }
+}
+
+async function importLocal() {
+  const result = await appStore.importLocalFrpc();
   if (result.success) {
-    message.success('已删除');
-  } else {
-    message.error(`删除失败：${result.error}`);
+    message.success(`导入成功！路径：${result.path}`);
+    await refresh();
+  } else if (result.error !== 'canceled') {
+    message.error(`导入失败：${result.error}`);
   }
 }
 
-onMounted(() => {
-  refresh();
-});
+onMounted(() => { refresh(); });
 </script>
 
 <template>
   <div class="versions-page">
     <div class="page-header">
       <h2 class="page-title">版本管理</h2>
-      <a-button :icon="h(ReloadOutlined)" @click="refresh" :loading="loading">刷新</a-button>
+      <a-space>
+        <a-button @click="importLocal">
+          <template #icon><ImportOutlined /></template>
+          导入本地
+        </a-button>
+        <a-button @click="refresh" :loading="loading">
+          <template #icon><ReloadOutlined /></template>
+          刷新
+        </a-button>
+      </a-space>
     </div>
 
     <a-card>
@@ -81,19 +93,19 @@ onMounted(() => {
               v-if="!record.downloaded"
               size="small"
               type="primary"
-              :icon="h(DownloadOutlined)"
               :loading="downloading === record.version"
               @click="download(record)"
             >
+              <template #icon><DownloadOutlined /></template>
               下载
             </a-button>
             <a-button
               v-else
               size="small"
               danger
-              :icon="h(DeleteOutlined)"
               @click="remove(record)"
             >
+              <template #icon><DeleteOutlined /></template>
               删除
             </a-button>
           </template>
