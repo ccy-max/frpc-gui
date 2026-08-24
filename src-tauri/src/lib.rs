@@ -66,24 +66,27 @@ pub fn run() {
             // 设置持久化
             commands::load_settings,
             commands::save_settings,
-            commands::pick_file,
-            commands::pick_directory,
             // 配置管理
             commands::load_config,
             commands::save_config,
             commands::export_config,
             commands::import_config,
+            commands::import_toml_config,
             // 进程控制
             commands::start_frp,
             commands::stop_frp,
             commands::restart_frp,
+            commands::reload_frp,
             commands::get_process_status,
+            commands::detect_frpc_process,
             // 日志
             commands::get_logs,
             // FRP 版本管理
             commands::list_frp_versions,
             commands::download_frp_version,
             commands::delete_frp_version,
+            commands::get_mirrors,
+            commands::import_local_frpc,
             // 系统
             commands::check_frpc_exists,
             commands::get_frpc_version,
