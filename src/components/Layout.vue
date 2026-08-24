@@ -1,22 +1,27 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useAppStore } from '@/stores/app';
-import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
 
 const appStore = useAppStore();
-const { t } = useI18n();
+const router = useRouter();
 
 const activeMenu = ref('dashboard');
 
 const menuItems = [
-  { key: 'dashboard', icon: 'DataBoard', label: t('nav.dashboard') },
-  { key: 'servers', icon: 'Server', label: t('nav.servers') },
-  { key: 'proxies', icon: 'Connection', label: t('nav.proxies') },
-  { key: 'versions', icon: 'Download', label: t('nav.versions') },
-  { key: 'logs', icon: 'Document', label: t('nav.logs') },
-  { key: 'settings', icon: 'Setting', label: t('nav.settings') },
-  { key: 'about', icon: 'InfoFilled', label: t('nav.about') },
+  { key: 'dashboard', icon: 'DataBoard', label: '概览' },
+  { key: 'servers', icon: 'Server', label: '服务器管理' },
+  { key: 'proxies', icon: 'Connection', label: '代理管理' },
+  { key: 'versions', icon: 'Download', label: '版本管理' },
+  { key: 'logs', icon: 'Document', label: '日志查看' },
+  { key: 'settings', icon: 'Setting', label: '设置' },
+  { key: 'about', icon: 'InfoFilled', label: '关于' },
 ];
+
+const handleMenuSelect = (key: string) => {
+  activeMenu.value = key;
+  router.push(`/${key}`);
+};
 </script>
 
 <template>
@@ -25,13 +30,13 @@ const menuItems = [
     <el-aside width="220px" class="app-aside">
       <div class="logo">
         <el-icon :size="28" color="var(--el-color-primary)"><Monitor /></el-icon>
-        <span class="logo-text">{{ t('common.appTitle') }}</span>
+        <span class="logo-text">FRPC GUI</span>
       </div>
       
       <el-menu
         :default-active="activeMenu"
         class="app-menu"
-        @select="activeMenu = $event"
+        @select="handleMenuSelect"
       >
         <el-menu-item
           v-for="item in menuItems"
@@ -45,8 +50,9 @@ const menuItems = [
       
       <!-- 底部状态 -->
       <div class="aside-footer">
-        <el-tag :type="appStore.runningServersCount > 0 ? 'success' : 'info'" size="small">
-          {{ t('dashboard.runningServers') }}: {{ appStore.runningServersCount }}
+        <el-tag :type="appStore.isRunning ? 'success' : 'info'" size="small">
+          <span class="status-dot" :class="appStore.isRunning ? 'running' : 'stopped'"></span>
+          {{ appStore.isRunning ? '运行中' : '已停止' }}
         </el-tag>
       </div>
     </el-aside>
@@ -69,8 +75,8 @@ const menuItems = [
 }
 
 .app-aside {
-  background: var(--el-bg-color);
-  border-right: 1px solid var(--el-border-color-light);
+  background: var(--app-sidebar-bg);
+  border-right: 1px solid var(--app-border-color);
   display: flex;
   flex-direction: column;
   
@@ -80,45 +86,47 @@ const menuItems = [
     align-items: center;
     justify-content: center;
     gap: 12px;
-    border-bottom: 1px solid var(--el-border-color-light);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     
     .logo-text {
       font-size: 18px;
       font-weight: 600;
-      color: var(--el-text-color-primary);
+      color: var(--app-sidebar-text);
     }
   }
   
   .app-menu {
     flex: 1;
     border-right: none;
+    background: transparent;
     padding-top: 8px;
     
     :deep(.el-menu-item) {
       height: 48px;
       margin: 4px 8px;
       border-radius: 8px;
+      color: var(--app-sidebar-text);
       
       &:hover {
-        background-color: var(--el-fill-color-light);
+        background-color: rgba(255, 255, 255, 0.1);
       }
       
       &.is-active {
-        background-color: var(--el-color-primary-light-9);
-        color: var(--el-color-primary);
+        background-color: var(--el-color-primary);
+        color: #ffffff;
       }
     }
   }
   
   .aside-footer {
     padding: 16px;
-    border-top: 1px solid var(--el-border-color-light);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
 }
 
 .app-main {
   padding: 0;
   overflow: hidden;
-  background: var(--el-fill-color-blank);
+  background: var(--app-bg-color);
 }
 </style>

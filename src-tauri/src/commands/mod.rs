@@ -35,61 +35,61 @@ pub struct ConfigResponse {
 }
 
 #[tauri::command]
-pub async fn load_config(state: State<'_, AppState>) -> ConfigResponse {
+pub async fn load_config(state: State<'_, AppState>) -> Result<ConfigResponse, String> {
     let config_manager = state.config_manager.lock().await;
     
     match config_manager.as_ref() {
         Some(cm) => match cm.load() {
-            Ok(config) => ConfigResponse {
+            Ok(config) => Ok(ConfigResponse {
                 success: true,
                 config: Some(config),
                 error: None,
-            },
-            Err(e) => ConfigResponse {
+            }),
+            Err(e) => Ok(ConfigResponse {
                 success: false,
                 config: None,
                 error: Some(e.to_string()),
-            },
+            }),
         },
-        None => ConfigResponse {
+        None => Ok(ConfigResponse {
             success: false,
             config: None,
             error: Some("配置管理器未初始化".to_string()),
-        },
+        }),
     }
 }
 
 #[tauri::command]
-pub async fn save_config(config: FrpConfig, state: State<'_, AppState>) -> ConfigResponse {
+pub async fn save_config(config: FrpConfig, state: State<'_, AppState>) -> Result<ConfigResponse, String> {
     // 验证配置
     if let Err(e) = validate_config(&config) {
-        return ConfigResponse {
+        return Ok(ConfigResponse {
             success: false,
             config: None,
             error: Some(e),
-        };
+        });
     }
 
     let config_manager = state.config_manager.lock().await;
     
     match config_manager.as_ref() {
         Some(cm) => match cm.save(&config) {
-            Ok(_) => ConfigResponse {
+            Ok(_) => Ok(ConfigResponse {
                 success: true,
                 config: Some(config),
                 error: None,
-            },
-            Err(e) => ConfigResponse {
+            }),
+            Err(e) => Ok(ConfigResponse {
                 success: false,
                 config: None,
                 error: Some(e.to_string()),
-            },
+            }),
         },
-        None => ConfigResponse {
+        None => Ok(ConfigResponse {
             success: false,
             config: None,
             error: Some("配置管理器未初始化".to_string()),
-        },
+        }),
     }
 }
 
@@ -192,7 +192,7 @@ pub async fn restart_frp(config: FrpConfig, state: State<'_, AppState>) -> Resul
 }
 
 #[tauri::command]
-pub async fn get_process_status(state: State<'_, AppState>) -> ProcessStatusResponse {
+pub async fn get_process_status(state: State<'_, AppState>) -> Result<ProcessStatusResponse, String> {
     let process_manager = state.process_manager.lock().await;
     
     match process_manager.as_ref() {
@@ -206,25 +206,25 @@ pub async fn get_process_status(state: State<'_, AppState>) -> ProcessStatusResp
                 ProcessState::Error(e) => (false, None, format!("error: {}", e)),
             };
             
-            ProcessStatusResponse {
+            Ok(ProcessStatusResponse {
                 running,
                 pid,
                 state: state_str,
-            }
+            })
         }
-        None => ProcessStatusResponse {
+        None => Ok(ProcessStatusResponse {
             running: false,
             pid: None,
             state: "not_initialized".to_string(),
-        },
+        }),
     }
 }
 
 /// 日志相关命令
 #[tauri::command]
-pub async fn get_logs(state: State<'_, AppState>) -> Vec<String> {
+pub async fn get_logs(_state: State<'_, AppState>) -> Result<Vec<String>, String> {
     // TODO: 实现日志历史记录
-    vec![]
+    Ok(vec![])
 }
 
 /// 系统相关命令

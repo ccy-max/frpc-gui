@@ -1,19 +1,16 @@
 <script setup lang="ts">
-import { useI18n } from 'vue-i18n';
 import { Star } from '@element-plus/icons-vue';
-
-function openUrl(url: string) {
-  window.open(url, '_blank');
-}
-
-const { t } = useI18n();
 
 const packageInfo = {
   version: '0.1.0',
   author: 'Zero',
   license: 'MIT',
-  github: 'https://github.com/your-repo/frpc-gui',
+  github: 'https://github.com/ccy-max/frpc-gui',
 };
+
+function openUrl(url: string) {
+  window.open(url, '_blank');
+}
 </script>
 
 <template>
@@ -21,25 +18,25 @@ const packageInfo = {
     <el-card class="about-card">
       <div class="logo-section">
         <el-icon :size="64" color="var(--el-color-primary)"><Monitor /></el-icon>
-        <h1 class="app-name">{{ t('common.appTitle') }}</h1>
-        <p class="description">{{ t('about.description') }}</p>
+        <h1 class="app-name">FRPC GUI</h1>
+        <p class="description">FRP 内网穿透桌面管理应用</p>
       </div>
 
       <el-descriptions :column="1" border>
-        <el-descriptions-item :label="t('about.version')">
+        <el-descriptions-item label="版本">
           <el-tag>{{ packageInfo.version }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item :label="t('about.author')">
+        <el-descriptions-item label="作者">
           {{ packageInfo.author }}
         </el-descriptions-item>
-        <el-descriptions-item :label="t('about.license')">
+        <el-descriptions-item label="许可证">
           {{ packageInfo.license }}
         </el-descriptions-item>
       </el-descriptions>
 
       <div class="links">
         <el-button type="primary" :icon="Star" @click="openUrl(packageInfo.github)">
-          {{ t('about.github') }}
+          GitHub 仓库
         </el-button>
       </div>
     </el-card>

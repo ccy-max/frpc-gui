@@ -9,25 +9,25 @@ const { t } = useI18n();
 
 const stats = computed(() => [
   {
-    title: t('dashboard.runningServers'),
+    title: '运行中的服务器',
     value: appStore.runningServersCount,
     icon: 'Server',
     color: 'var(--el-color-success)',
   },
   {
-    title: t('dashboard.totalProxies'),
+    title: '代理总数',
     value: appStore.proxies.length,
     icon: 'Connection',
     color: 'var(--el-color-primary)',
   },
   {
-    title: t('dashboard.activeProxies'),
-    value: appStore.activeProxies.length,
+    title: '活跃代理',
+    value: appStore.activeProxiesCount,
     icon: 'CircleCheck',
     color: 'var(--el-color-warning)',
   },
   {
-    title: t('version.title'),
+    title: 'FRP 版本',
     value: appStore.versions.length,
     icon: 'Download',
     color: 'var(--el-color-info)',
@@ -41,7 +41,7 @@ const recentLogs = computed(() =>
 
 <template>
   <div class="dashboard">
-    <h2 class="page-title">{{ t('dashboard.title') }}</h2>
+    <h2 class="page-title">概览</h2>
     
     <!-- 统计卡片 -->
     <el-row :gutter="16" class="stats-row">
@@ -66,21 +66,21 @@ const recentLogs = computed(() =>
     <el-card class="quick-start-card" shadow="hover">
       <template #header>
         <div class="card-header">
-          <span>{{ t('dashboard.quickStart') }}</span>
+          <span>快速启动</span>
         </div>
       </template>
       <div class="quick-actions">
         <el-button type="primary" :icon="Plus">
-          {{ t('server.addServer') }}
+          添加服务器
         </el-button>
-        <el-button type="success" :icon="VideoPlay">
-          {{ t('proxy.start') }}
+        <el-button type="success" :icon="VideoPlay" @click="appStore.startFRP()">
+          启动 FRP
         </el-button>
-        <el-button type="warning" :icon="Document">
-          {{ t('nav.logs') }}
+        <el-button type="warning" :icon="Document" @click="$router.push('/logs')">
+          查看日志
         </el-button>
-        <el-button type="info" :icon="Setting">
-          {{ t('nav.settings') }}
+        <el-button type="info" :icon="Setting" @click="$router.push('/settings')">
+          设置
         </el-button>
       </div>
     </el-card>
@@ -89,13 +89,13 @@ const recentLogs = computed(() =>
     <el-card class="logs-card" shadow="hover">
       <template #header>
         <div class="card-header flex-between">
-          <span>{{ t('dashboard.recentLogs') }}</span>
-          <el-button text type="primary" size="small">
-            {{ t('log.title') }}
+          <span>最近日志</span>
+          <el-button text type="primary" size="small" @click="$router.push('/logs')">
+            查看全部
           </el-button>
         </div>
       </template>
-      <el-empty v-if="recentLogs.length === 0" :description="t('log.title')" />
+      <el-empty v-if="recentLogs.length === 0" description="暂无日志" />
       <el-table v-else :data="recentLogs" :height="200" size="small">
         <el-table-column prop="timestamp" label="时间" width="180">
           <template #default="{ row }">

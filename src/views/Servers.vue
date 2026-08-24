@@ -2,108 +2,61 @@
 import { ref, computed } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useI18n } from 'vue-i18n';
-import type { ServerConfig } from '@/types';
-import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus } from '@element-plus/icons-vue';
 
 const appStore = useAppStore();
 const { t } = useI18n();
 
 const dialogVisible = ref(false);
-const editingServer = ref<ServerConfig | null>(null);
+const editingId = ref<string | null>(null);
 
-const formRef = ref();
-const form = ref<ServerConfig>({
+const form = ref({
   id: '',
   name: '',
   serverAddr: '',
   serverPort: 7000,
-  authMethod: 'token',
   token: '',
-  user: '',
-  metaToken: '',
   tlsEnable: false,
-  logLevel: 'info',
-  logMaxDays: 3,
-  adminAddr: '127.0.0.1',
-  adminPort: 7400,
-  adminUser: 'admin',
-  adminPassword: 'admin',
   enabled: true,
-  createdAt: Date.now(),
-  updatedAt: Date.now(),
 });
 
-const rules = {
-  name: [{ required: true, message: t('server.placeholder.name'), trigger: 'blur' }],
-  serverAddr: [{ required: true, message: t('server.placeholder.serverAddr'), trigger: 'blur' }],
-  serverPort: [
-    { required: true, message: t('server.placeholder.serverPort'), trigger: 'blur' },
-    { type: 'number', min: 1, max: 65535, message: '端口范围 1-65535', trigger: 'blur' }
-  ],
-};
-
 function openAddDialog() {
-  editingServer.value = null;
+  editingId.value = null;
   form.value = {
-    id: crypto.randomUUID(),
+    id: '',
     name: '',
     serverAddr: '',
     serverPort: 7000,
-    authMethod: 'token',
     token: '',
-    user: '',
-    metaToken: '',
     tlsEnable: false,
-    logLevel: 'info',
-    logMaxDays: 3,
-    adminAddr: '127.0.0.1',
-    adminPort: 7400,
-    adminUser: 'admin',
-    adminPassword: 'admin',
     enabled: true,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
   };
   dialogVisible.value = true;
 }
 
-function openEditDialog(server: ServerConfig) {
-  editingServer.value = server;
+function openEditDialog(server: any) {
+  editingId.value = server.id;
   form.value = { ...server };
   dialogVisible.value = true;
 }
 
 function handleSave() {
-  formRef.value.validate(async (valid: boolean) => {
-    if (!valid) return;
-    
-    if (editingServer.value) {
-      appStore.updateServer(editingServer.value.id, form.value);
-      ElMessage.success(t('message.saveSuccess'));
-    } else {
-      appStore.addServer(form.value);
-      ElMessage.success(t('message.saveSuccess'));
-    }
-    
-    dialogVisible.value = false;
-  });
+  if (!form.value.name || !form.value.serverAddr) {
+    return;
+  }
+  
+  if (editingId.value) {
+    appStore.updateServer(editingId.value, form.value);
+  } else {
+    form.value.id = Date.now().toString();
+    appStore.addServer(form.value);
+  }
+  
+  dialogVisible.value = false;
 }
 
-function handleDelete(server: ServerConfig) {
-  ElMessageBox.confirm(t('message.deleteConfirm'), t('common.warning'), {
-    confirmButtonText: t('common.confirm'),
-    cancelButtonText: t('common.cancel'),
-    type: 'warning',
-  }).then(() => {
-    appStore.deleteServer(server.id);
-    ElMessage.success(t('message.deleteSuccess'));
-  }).catch(() => {});
-}
-
-function testConnection(server: ServerConfig) {
-  ElMessage.info('测试连接功能开发中...');
-  // TODO: 调用后端测试连接
+function handleDelete(server: any) {
+  appStore.deleteServer(server.id);
 }
 
 const servers = computed(() => appStore.servers);
@@ -112,127 +65,77 @@ const servers = computed(() => appStore.servers);
 <template>
   <div class="servers-page">
     <div class="page-header">
-      <h2 class="page-title">{{ t('server.title') }}</h2>
+      <h2 class="page-title">服务器管理</h2>
       <el-button type="primary" :icon="Plus" @click="openAddDialog">
-        {{ t('server.addServer') }}
+        添加服务器
       </el-button>
     </div>
 
-    <!-- 服务器列表 -->
-    <el-table :data="servers" style="width: 100%" v-loading="servers.length === 0">
-      <el-table-column prop="name" :label="t('server.name')" min-width="150" />
-      <el-table-column prop="serverAddr" :label="t('server.serverAddr')" min-width="150" />
-      <el-table-column prop="serverPort" :label="t('server.serverPort')" width="100" />
-      <el-table-column prop="authMethod" :label="t('server.authMethod')" width="120">
-        <template #default="{ row }">
-          <el-tag size="small">{{ row.authMethod || 'token' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="tlsEnable" :label="t('server.tlsEnable')" width="100">
+    <el-table :data="servers" style="width: 100%">
+      <el-table-column prop="name" label="名称" min-width="150" />
+      <el-table-column prop="serverAddr" label="服务器地址" min-width="200" />
+      <el-table-column prop="serverPort" label="端口" width="100" />
+      <el-table-column prop="tlsEnable" label="TLS" width="80">
         <template #default="{ row }">
           <el-tag :type="row.tlsEnable ? 'success' : 'info'" size="small">
             {{ row.tlsEnable ? '✓' : '✗' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="enabled" :label="t('proxy.enabled')" width="100">
+      <el-table-column prop="enabled" label="启用" width="100">
         <template #default="{ row }">
-          <el-switch v-model="row.enabled" size="small" @change="appStore.updateServer(row.id, { enabled: row.enabled })" />
+          <el-switch v-model="row.enabled" size="small" />
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.operation')" width="220" fixed="right">
+      <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" @click="testConnection(row as ServerConfig)">
-            {{ t('server.testConnection') }}
+          <el-button size="small" type="primary" @click="openEditDialog(row)">
+            编辑
           </el-button>
-          <el-button size="small" type="primary" @click="openEditDialog(row as ServerConfig)">
-            {{ t('common.edit') }}
-          </el-button>
-          <el-button size="small" type="danger" @click="handleDelete(row as ServerConfig)">
-            {{ t('common.delete') }}
+          <el-button size="small" type="danger" @click="handleDelete(row)">
+            删除
           </el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-empty v-if="servers.length === 0" :description="t('server.title')" />
+    <el-empty v-if="servers.length === 0" description="暂无服务器配置" />
 
     <!-- 编辑/添加对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="editingServer ? t('server.editServer') : t('server.addServer')"
-      width="600px"
+      :title="editingId ? '编辑服务器' : '添加服务器'"
+      width="500px"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
-        <el-form-item :label="t('server.name')" prop="name">
-          <el-input v-model="form.name" :placeholder="t('server.placeholder.name')" />
+      <el-form :model="form" label-width="100px">
+        <el-form-item label="名称" required>
+          <el-input v-model="form.name" placeholder="请输入服务器名称" />
         </el-form-item>
         
-        <el-row :gutter="16">
-          <el-col :span="16">
-            <el-form-item :label="t('server.serverAddr')" prop="serverAddr">
-              <el-input v-model="form.serverAddr" :placeholder="t('server.placeholder.serverAddr')" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item :label="t('server.serverPort')" prop="serverPort">
-              <el-input-number v-model="form.serverPort" :min="1" :max="65535" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-form-item :label="t('server.authMethod')" prop="authMethod">
-          <el-select v-model="form.authMethod" style="width: 100%">
-            <el-option label="Token" value="token" />
-            <el-option label="MultiUser" value="multiuser" />
-            <el-option label="OIDC" value="oidc" />
-          </el-select>
+        <el-form-item label="服务器地址" required>
+          <el-input v-model="form.serverAddr" placeholder="例如：127.0.0.1" />
+        </el-form-item>
+        
+        <el-form-item label="端口" required>
+          <el-input-number v-model="form.serverPort" :min="1" :max="65535" style="width: 100%" />
         </el-form-item>
 
-        <el-form-item :label="t('server.token')" prop="token" v-if="form.authMethod === 'token'">
-          <el-input v-model="form.token" type="password" show-password :placeholder="t('server.placeholder.token')" />
+        <el-form-item label="令牌">
+          <el-input v-model="form.token" type="password" show-password />
         </el-form-item>
 
-        <el-form-item :label="t('server.user')" prop="user" v-if="form.authMethod === 'multiuser'">
-          <el-input v-model="form.user" />
-        </el-form-item>
-
-        <el-form-item :label="t('server.metaToken')" prop="metaToken">
-          <el-input v-model="form.metaToken" />
-        </el-form-item>
-
-        <el-form-item :label="t('server.tlsEnable')">
+        <el-form-item label="启用 TLS">
           <el-switch v-model="form.tlsEnable" />
         </el-form-item>
 
-        <el-divider />
-
-        <el-form-item :label="t('server.logLevel')">
-          <el-select v-model="form.logLevel" style="width: 100%">
-            <el-option label="Debug" value="debug" />
-            <el-option label="Info" value="info" />
-            <el-option label="Warn" value="warn" />
-            <el-option label="Error" value="error" />
-          </el-select>
+        <el-form-item label="启用">
+          <el-switch v-model="form.enabled" />
         </el-form-item>
-
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item :label="t('server.adminAddr')">
-              <el-input v-model="form.adminAddr" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item :label="t('server.adminPort')">
-              <el-input-number v-model="form.adminPort" :min="1" :max="65535" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
       </el-form>
 
       <template #footer>
-        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="handleSave">{{ t('common.save') }}</el-button>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSave">保存</el-button>
       </template>
     </el-dialog>
   </div>

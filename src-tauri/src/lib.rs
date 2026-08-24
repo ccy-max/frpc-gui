@@ -41,7 +41,7 @@ pub fn run() {
             {
                 use tauri::{
                     menu::{Menu, MenuItem},
-                    tray::{TrayIconBuilder, TrayIconEvent},
+                    tray::TrayIconBuilder,
                 };
 
                 let show_i = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;

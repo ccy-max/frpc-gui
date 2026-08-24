@@ -1,57 +1,43 @@
 <script setup lang="ts">
 import { useAppStore } from '@/stores/app';
-import { useI18n } from 'vue-i18n';
 import { Folder } from '@element-plus/icons-vue';
 
 const appStore = useAppStore();
-const { t } = useI18n();
 
 function handleConfigChange() {
-  appStore.saveConfig();
+  appStore.saveConfig(appStore.frpConfig || {} as any);
 }
 </script>
 
 <template>
   <div class="settings-page">
-    <h2 class="page-title">{{ t('settings.title') }}</h2>
+    <h2 class="page-title">设置</h2>
 
     <el-row :gutter="16">
       <el-col :span="12">
         <el-card>
           <template #header>
-            <span>{{ t('settings.general') }}</span>
+            <span>通用设置</span>
           </template>
           
-          <el-form label-width="140px">
-            <el-form-item :label="t('settings.language')">
-              <el-select v-model="appStore.config.language" @change="handleConfigChange" style="width: 100%">
+          <el-form label-width="120px">
+            <el-form-item label="语言">
+              <el-select v-model="appStore.language" @change="handleConfigChange" style="width: 100%">
                 <el-option label="简体中文" value="zh-CN" />
                 <el-option label="English" value="en-US" />
               </el-select>
             </el-form-item>
 
-            <el-form-item :label="t('settings.theme')">
-              <el-select v-model="appStore.config.theme" @change="handleConfigChange" style="width: 100%">
-                <el-option :label="t('settings.light')" value="light" />
-                <el-option :label="t('settings.dark')" value="dark" />
-                <el-option :label="t('settings.auto')" value="auto" />
+            <el-form-item label="主题">
+              <el-select v-model="appStore.theme" @change="handleConfigChange" style="width: 100%">
+                <el-option label="浅色" value="light" />
+                <el-option label="深色" value="dark" />
+                <el-option label="跟随系统" value="auto" />
               </el-select>
             </el-form-item>
 
-            <el-form-item :label="t('settings.startup')">
-              <el-switch v-model="appStore.config.autoStart" @change="handleConfigChange" />
-            </el-form-item>
-
-            <el-form-item :label="t('settings.minimizeToTray')">
-              <el-switch v-model="appStore.config.minimizeToTray" />
-            </el-form-item>
-
-            <el-form-item :label="t('settings.closeToTray')">
-              <el-switch v-model="appStore.config.closeToTray" />
-            </el-form-item>
-
-            <el-form-item :label="t('settings.checkUpdateOnStart')">
-              <el-switch v-model="appStore.config.checkUpdateOnStart" />
+            <el-form-item label="开机自启">
+              <el-switch v-model="appStore.processStatus.running" />
             </el-form-item>
           </el-form>
         </el-card>
@@ -60,36 +46,22 @@ function handleConfigChange() {
       <el-col :span="12">
         <el-card>
           <template #header>
-            <span>{{ t('settings.advanced') }}</span>
+            <span>路径设置</span>
           </template>
           
-          <el-form label-width="140px">
-            <el-form-item :label="t('settings.frpPath')">
-              <el-input v-model="appStore.config.frpBinaryPath" readonly>
+          <el-form label-width="120px">
+            <el-form-item label="FRP 路径">
+              <el-input readonly placeholder="请选择 frpc 可执行文件路径">
                 <template #append>
-                  <el-button :icon="Folder">
-                    {{ t('settings.browse') }}
-                  </el-button>
+                  <el-button :icon="Folder">浏览</el-button>
                 </template>
               </el-input>
             </el-form-item>
 
-            <el-form-item :label="t('settings.configPath')">
-              <el-input v-model="appStore.config.configPath" readonly>
+            <el-form-item label="配置路径">
+              <el-input readonly placeholder="frpc.toml 保存路径">
                 <template #append>
-                  <el-button :icon="Folder">
-                    {{ t('settings.browse') }}
-                  </el-button>
-                </template>
-              </el-input>
-            </el-form-item>
-
-            <el-form-item :label="t('settings.logPath')">
-              <el-input v-model="appStore.config.logPath" readonly>
-                <template #append>
-                  <el-button :icon="Folder">
-                    {{ t('settings.browse') }}
-                  </el-button>
+                  <el-button :icon="Folder">浏览</el-button>
                 </template>
               </el-input>
             </el-form-item>

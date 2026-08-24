@@ -4,7 +4,7 @@ import type { FrpConfig, ProxyConfig, ProcessStatus, LogEntry } from '@/types';
 import { invoke } from '@tauri-apps/api/core';
 
 export const useAppStore = defineStore('app', () => {
-  // 应用状态
+  // 应用配置
   const theme = ref<'light' | 'dark' | 'auto'>('auto');
   const language = ref<'zh-CN' | 'en-US'>('zh-CN');
   
@@ -22,11 +22,25 @@ export const useAppStore = defineStore('app', () => {
   const logs = ref<LogEntry[]>([]);
   const autoScrollLogs = ref(true);
   
+  // 服务器列表 (用于 UI 显示)
+  const servers = ref<any[]>([]);
+  const proxies = ref<any[]>([]);
+  const versions = ref<any[]>([]);
+  
   // 计算属性
   const isRunning = computed(() => processStatus.value.running);
+  
+  const runningServersCount = computed(() => {
+    return processStatus.value.running ? 1 : 0;
+  });
+  
+  const activeProxies = computed(() => {
+    if (!frpConfig.value) return [];
+    return frpConfig.value.proxies.filter(p => p.enabled);
+  });
+  
   const activeProxiesCount = computed(() => {
-    if (!frpConfig.value) return 0;
-    return frpConfig.value.proxies.filter(p => p.enabled).length;
+    return activeProxies.value.length;
   });
   
   // 方法
@@ -55,8 +69,10 @@ export const useAppStore = defineStore('app', () => {
       if (result.success && result.config) {
         frpConfig.value = result.config;
       }
+      return result;
     } catch (error) {
       console.error('Failed to load config:', error);
+      return { success: false, config: null, error: String(error) };
     }
   }
   
@@ -65,14 +81,64 @@ export const useAppStore = defineStore('app', () => {
       const result = await invoke<ConfigResponse>('save_config', { config });
       if (result.success && result.config) {
         frpConfig.value = result.config;
-        return { success: true };
       }
-      return { success: false, error: result.error };
+      return result;
     } catch (error) {
-      return { success: false, error: String(error) };
+      return { success: false, config: null, error: String(error) };
     }
   }
   
+  // 服务器管理 (简化版本，直接操作 frpConfig)
+  function addServer(serverData: any) {
+    servers.value.push(serverData);
+  }
+  
+  function updateServer(id: string, updates: any) {
+    const index = servers.value.findIndex(s => s.id === id);
+    if (index !== -1) {
+      servers.value[index] = { ...servers.value[index], ...updates };
+    }
+  }
+  
+  function deleteServer(id: string) {
+    servers.value = servers.value.filter(s => s.id !== id);
+  }
+  
+  // 代理管理
+  function addProxy(proxyData: any) {
+    proxies.value.push(proxyData);
+    // 同时更新 frpConfig
+    if (frpConfig.value) {
+      frpConfig.value.proxies.push(proxyData);
+    }
+  }
+  
+  function updateProxy(name: string, updates: any) {
+    const index = proxies.value.findIndex(p => p.name === name);
+    if (index !== -1) {
+      proxies.value[index] = { ...proxies.value[index], ...updates };
+    }
+    // 同时更新 frpConfig
+    if (frpConfig.value) {
+      const configIndex = frpConfig.value.proxies.findIndex(p => p.name === name);
+      if (configIndex !== -1) {
+        frpConfig.value.proxies[configIndex] = { 
+          ...frpConfig.value.proxies[configIndex], 
+          ...updates 
+        };
+      }
+    }
+  }
+  
+  function deleteProxy(name: string) {
+    proxies.value = proxies.value.filter(p => p.name !== name);
+    // 同时更新 frpConfig
+    if (frpConfig.value) {
+      frpConfig.value.proxies = frpConfig.value.proxies.filter(p => p.name !== name);
+    }
+  }
+  
+  // FRP 进程控制
   async function startFRP() {
     if (!frpConfig.value) {
       return { success: false, error: '没有配置' };
@@ -144,6 +210,7 @@ export const useAppStore = defineStore('app', () => {
     }
   }
   
+  // 日志管理
   function addLog(entry: LogEntry) {
     logs.value.push(entry);
     // 限制日志数量
@@ -156,6 +223,15 @@ export const useAppStore = defineStore('app', () => {
     logs.value = [];
   }
   
+  // 版本管理
+  function addVersion(version: any) {
+    versions.value.push(version);
+  }
+  
+  function deleteVersion(version: string) {
+    versions.value = versions.value.filter(v => v.version !== version);
+  }
+  
   // 初始化
   function init() {
     applyTheme(theme.value);
@@ -164,24 +240,42 @@ export const useAppStore = defineStore('app', () => {
   }
   
   return {
+    // State
     theme,
     language,
     frpConfig,
     processStatus,
     logs,
     autoScrollLogs,
+    servers,
+    proxies,
+    versions,
+    
+    // Getters
     isRunning,
+    runningServersCount,
+    activeProxies,
     activeProxiesCount,
+    
+    // Actions
     setTheme,
     setLanguage,
     loadConfig,
     saveConfig,
+    addServer,
+    updateServer,
+    deleteServer,
+    addProxy,
+    updateProxy,
+    deleteProxy,
     startFRP,
     stopFRP,
     restartFRP,
     refreshProcessStatus,
     addLog,
     clearLogs,
+    addVersion,
+    deleteVersion,
     init,
   };
 });
