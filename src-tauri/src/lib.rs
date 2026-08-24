@@ -49,22 +49,27 @@ pub fn run() {
                 
                 let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
                 
-                let _tray = TrayIconBuilder::new()
-                    .icon(app.default_window_icon().unwrap().clone())
-                    .menu(&menu)
-                    .on_menu_event(|app, event| match event.id.as_ref() {
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                window.show().unwrap();
-                                window.set_focus().unwrap();
+                // 安全获取窗口图标，避免 panic
+                if let Some(icon) = app.default_window_icon() {
+                    let _tray = TrayIconBuilder::new()
+                        .icon(icon.clone())
+                        .menu(&menu)
+                        .on_menu_event(|app, event| match event.id.as_ref() {
+                            "show" => {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
                             }
-                        }
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        _ => {}
-                    })
-                    .build(app)?;
+                            "quit" => {
+                                app.exit(0);
+                            }
+                            _ => {}
+                        })
+                        .build(app)?;
+                } else {
+                    log::warn!("No default window icon found, skipping tray icon");
+                }
             }
             
             Ok(())
@@ -89,7 +94,10 @@ pub fn run() {
         ])
         // 运行应用
         .run(tauri::generate_context!())
-        .expect("error while running FRPC GUI application");
+        .unwrap_or_else(|e| {
+            log::error!("致命错误：{}", e);
+            std::process::exit(1);
+        });
 
     info!("FRPC GUI application exited");
 }

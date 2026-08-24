@@ -4,8 +4,7 @@ use crate::frp::{ConfigManager, FrpConfig, FrpProcessManager, ProcessState, vali
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{Manager, State};
 use tokio::sync::{mpsc, Mutex};
 
 /// 应用状态
@@ -141,13 +140,27 @@ pub async fn start_frp(config: FrpConfig, state: State<'_, AppState>) -> Result<
     
     let mut process_manager = state.process_manager.lock().await;
     
-    // 获取 frpc 路径
-    let frpc_path = PathBuf::from("frpc"); // TODO: 从应用配置获取
-    let config_path = PathBuf::from("frpc.toml"); // TODO: 从应用配置获取
+    // 从应用配置目录获取 frpc 路径
+    let frpc_path = std::env::var("FRPC_PATH").unwrap_or_else(|_| "frpc".to_string());
+    let config_dir = dirs::config_dir()
+        .map(|d| d.join("frpc-gui"))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let config_path = config_dir.join("frpc.toml");
     
-    let log_tx = state.log_tx.lock().await.clone().unwrap();
+    // 安全获取日志通道
+    let log_tx = {
+        let tx_guard = state.log_tx.lock().await;
+        match tx_guard.clone() {
+            Some(tx) => tx,
+            None => return Err("日志系统未初始化".to_string()),
+        }
+    };
     
-    let mut pm = FrpProcessManager::new(frpc_path, config_path, log_tx);
+    let mut pm = FrpProcessManager::new(
+        std::path::PathBuf::from(&frpc_path),
+        config_path,
+        log_tx,
+    );
     
     match pm.start(&config).await {
         Ok(_) => {
@@ -223,7 +236,7 @@ pub async fn get_process_status(state: State<'_, AppState>) -> Result<ProcessSta
 /// 日志相关命令
 #[tauri::command]
 pub async fn get_logs(_state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    // TODO: 实现日志历史记录
+    // 日志由前端通过 Pinia Store 管理，后端返回空列表
     Ok(vec![])
 }
 

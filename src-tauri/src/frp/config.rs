@@ -233,7 +233,7 @@ pub fn validate_config(config: &FrpConfig) -> Result<(), String> {
 
     for proxy in &config.proxies {
         if proxy.name.is_empty() {
-            return Err(format!("代理名称不能为空"));
+            return Err("代理名称不能为空".to_string());
         }
 
         if proxy.proxy_type.is_empty() {

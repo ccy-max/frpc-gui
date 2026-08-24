@@ -4,8 +4,9 @@ use super::config::FrpConfig;
 use anyhow::{Context, Result};
 use log::{error, info};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 /// 进程状态
@@ -26,8 +27,6 @@ pub struct FrpProcessManager {
     frpc_path: PathBuf,
     config_path: PathBuf,
 }
-
-use std::sync::Arc;
 
 impl FrpProcessManager {
     pub fn new(frpc_path: PathBuf, config_path: PathBuf, log_tx: mpsc::Sender<String>) -> Self {

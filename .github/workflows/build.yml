@@ -78,22 +78,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            src-tauri/target/release/FRPC GUI.exe
+            src-tauri/target/release/frpc-gui.exe
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
           body: |
             ## 🎉 FRPC GUI ${{ github.ref_name }}
             
             ### 📦 下载
-            - **FRPC GUI.exe** - 直接运行的可执行文件（推荐）
-            - **FRPC GUI_*_x64-setup.exe** - NSIS 安装程序
-            - **FRPC GUI_*_x64.msi** - MSI 安装包
+            - **frpc-gui.exe** - 直接运行的可执行文件（推荐）
+            - **frpc-gui_*_x64-setup.exe** - NSIS 安装程序
+            - **frpc-gui_*_x64.msi** - MSI 安装包
             
             ### ✨ 更新内容
             详见 [CHANGELOG.md](CHANGELOG.md)
             
             ### 📝 使用说明
-            1. 下载 `FRPC GUI.exe`
+            1. 下载 `frpc-gui.exe`
             2. 双击运行即可
             3. 无需安装，无需 .NET Framework
           draft: true
