@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter } from 'vue-router';
 import { PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, FileTextOutlined, SettingOutlined } from '@ant-design/icons-vue';
+import { Tag } from 'ant-design-vue';
 
 const appStore = useAppStore();
 const router = useRouter();
@@ -53,11 +54,10 @@ onUnmounted(() => {
 
 // 监听运行状态变化
 const prevRunning = ref(appStore.isRunning);
-const watcher = computed(() => appStore.isRunning);
-watch(watcher, (newVal) => {
+watch(() => appStore.isRunning, (newVal) => {
   if (newVal !== prevRunning.value) {
     if (newVal) {
-      uptimeSeconds.value = 0; // 重新开始计时
+      uptimeSeconds.value = 0;
     }
     prevRunning.value = newVal;
   }
@@ -65,22 +65,12 @@ watch(watcher, (newVal) => {
 
 const recentLogs = computed(() => appStore.logs.slice(-5).reverse());
 
-const columns = [
-  { title: '时间', dataIndex: 'timestamp', key: 'timestamp', width: 180,
-    customRender: ({ text }: { text: number }) => new Date(text).toLocaleString() },
-  { title: '级别', key: 'level', width: 80,
-    customRender: ({ record }: { record: any }) => {
-      const colors: Record<string, string> = { debug: 'purple', info: 'blue', warn: 'orange', error: 'red' };
-      return h('a-tag', { color: colors[record.level] || '' }, { default: () => record.level.toUpperCase() });
-    }
-  },
-  { title: '消息', dataIndex: 'message', key: 'message' },
-];
-
-// 简单的 h 函数
-function h(tag: string, props: any = {}, children: any = {}) {
-  return { tag, props, children };
-}
+const logColors: Record<string, string> = {
+  debug: 'purple',
+  info: 'blue',
+  warn: 'orange',
+  error: 'red',
+};
 </script>
 
 <template>
@@ -129,7 +119,21 @@ function h(tag: string, props: any = {}, children: any = {}) {
         <a-button type="link" size="small" @click="router.push('/logs')">查看全部</a-button>
       </template>
       <a-empty v-if="recentLogs.length === 0" description="暂无日志" />
-      <a-table v-else :data-source="recentLogs" :columns="columns as any" :pagination="false" size="small" />
+      <a-table v-else :data-source="recentLogs" :pagination="false" size="small">
+        <a-table-column title="时间" dataIndex="timestamp" width="180">
+          <template #bodyCell="{ record }">
+            {{ new Date(record.timestamp).toLocaleString() }}
+          </template>
+        </a-table-column>
+        <a-table-column title="级别" key="level" width="80">
+          <template #bodyCell="{ record }">
+            <a-tag :color="logColors[record.level] || ''">
+              {{ record.level.toUpperCase() }}
+            </a-tag>
+          </template>
+        </a-table-column>
+        <a-table-column title="消息" dataIndex="message" />
+      </a-table>
     </a-card>
   </div>
 </template>
