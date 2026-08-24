@@ -6,7 +6,10 @@ const appStore = useAppStore();
 
 onMounted(async () => {
   appStore.init();
-  await appStore.loadConfig();
+  // 延迟加载配置，避免阻塞渲染
+  setTimeout(() => {
+    appStore.loadConfig().catch(console.error);
+  }, 100);
 });
 </script>
 

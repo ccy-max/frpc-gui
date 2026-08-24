@@ -65,11 +65,7 @@ const handleMenuSelect = (key: string) => {
 
     <!-- 主内容区 -->
     <a-layout-content class="app-content">
-      <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </router-view>
+      <router-view />
     </a-layout-content>
   </a-layout>
 </template>
