@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useAppStore } from '@/stores/app';
-import { FolderOpenOutlined, ExportOutlined, ImportOutlined, CopyOutlined, SnippetsOutlined } from '@ant-design/icons-vue';
+import { 
+  FolderOpenOutlined, 
+  ExportOutlined, 
+  ImportOutlined, 
+  CopyOutlined, 
+  SnippetsOutlined,
+  CheckCircleOutlined
+} from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
-import { invoke } from '@tauri-apps/api/core';
 import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager';
 
 const appStore = useAppStore();
 
 const activeTab = ref('basic');
 
-// 传输协议选项
+// ===== 选项数据 =====
 const transportProtocols = [
   { value: 'tcp', label: 'TCP' },
   { value: 'kcp', label: 'KCP' },
@@ -18,7 +24,6 @@ const transportProtocols = [
   { value: 'websocket', label: 'WebSocket' },
 ];
 
-// 日志级别选项
 const logLevels = [
   { value: 'trace', label: 'Trace' },
   { value: 'debug', label: 'Debug' },
@@ -27,7 +32,7 @@ const logLevels = [
   { value: 'error', label: 'Error' },
 ];
 
-// 配置访问器 - 避免可选链赋值问题
+// ===== 配置访问器 =====
 const transportProtocol = computed({
   get: () => appStore.frpConfig?.transport.protocol || 'tcp',
   set: (v) => { if (appStore.frpConfig) appStore.frpConfig.transport.protocol = v; }
@@ -93,12 +98,11 @@ const adminPassword = computed({
   set: (v) => { if (appStore.frpConfig) appStore.frpConfig.admin.password = v; }
 });
 
-// Base64 配置分享
+// ===== Base64 配置分享 =====
 const base64DialogVisible = ref(false);
 const base64Mode = ref<'export' | 'import'>('export');
 const base64Text = ref('');
 
-// 安全的 Base64 编码/解码（支持 Unicode）
 function safeEncodeBase64(str: string): string {
   try {
     return btoa(unescape(encodeURIComponent(str)));
@@ -164,13 +168,10 @@ async function handleParseBase64() {
   try {
     const json = safeDecodeBase64(base64Text.value.trim());
     const config = JSON.parse(json);
-    
-    // 基本验证
     if (!config.server_addr || !config.proxies) {
       message.error('无效的配置格式：缺少必要字段');
       return;
     }
-    
     appStore.frpConfig = config;
     await appStore.saveConfig(config);
     message.success('配置导入成功');
@@ -218,215 +219,241 @@ async function pickFile(field: string, ext: string[]) {
 
 <template>
   <div class="settings-page">
-    <h2 class="page-title">设置</h2>
+    <div class="page-header">
+      <h2 class="page-title">设置</h2>
+    </div>
     
-    <a-tabs v-model:activeKey="activeTab">
-      <!-- 通用设置 -->
-      <a-tab-pane key="general" tab="通用">
-        <a-form layout="vertical" style="max-width: 500px">
-          <a-form-item label="语言">
-            <a-select v-model:value="appStore.language" @change="handleConfigChange" style="width: 100%">
-              <a-select-option value="zh-CN">简体中文</a-select-option>
-              <a-select-option value="en-US">English</a-select-option>
-            </a-select>
-          </a-form-item>
-          <a-form-item label="主题">
-            <a-select v-model:value="appStore.theme" @change="handleConfigChange" style="width: 100%">
-              <a-select-option value="light">浅色</a-select-option>
-              <a-select-option value="dark">深色</a-select-option>
-              <a-select-option value="auto">跟随系统</a-select-option>
-            </a-select>
-          </a-form-item>
-          <a-form-item label="启动选项">
-            <a-space direction="vertical">
-              <a-checkbox v-model:checked="appStore.autoStart" @change="handleConfigChange">开机自启</a-checkbox>
-              <a-checkbox v-model:checked="appStore.minimizeToTray" @change="handleConfigChange">最小化到托盘</a-checkbox>
-              <a-checkbox v-model:checked="appStore.closeToTray" @change="handleConfigChange">关闭到托盘</a-checkbox>
+    <a-card :bordered="false">
+      <a-tabs v-model:activeKey="activeTab" type="card">
+        <!-- 通用设置 -->
+        <a-tab-pane key="general" tab="通用">
+          <a-form layout="vertical" :wrapper-col="{ span: 12 }">
+            <a-form-item label="语言">
+              <a-select v-model:value="appStore.language" @change="handleConfigChange" style="width: 200px">
+                <a-select-option value="zh-CN">简体中文</a-select-option>
+                <a-select-option value="en-US">English</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="主题">
+              <a-select v-model:value="appStore.theme" @change="handleConfigChange" style="width: 200px">
+                <a-select-option value="light">浅色</a-select-option>
+                <a-select-option value="dark">深色</a-select-option>
+                <a-select-option value="auto">跟随系统</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="启动选项">
+              <a-space direction="vertical" style="margin-top: 8px">
+                <a-checkbox v-model:checked="appStore.autoStart" @change="handleConfigChange">开机自启</a-checkbox>
+                <a-checkbox v-model:checked="appStore.minimizeToTray" @change="handleConfigChange">最小化到托盘</a-checkbox>
+                <a-checkbox v-model:checked="appStore.closeToTray" @change="handleConfigChange">关闭到托盘</a-checkbox>
+              </a-space>
+            </a-form-item>
+          </a-form>
+        </a-tab-pane>
+
+        <!-- 路径设置 -->
+        <a-tab-pane key="paths" tab="路径">
+          <a-form layout="vertical" :wrapper-col="{ span: 20 }">
+            <a-form-item label="FRP 可执行文件">
+              <a-input
+                v-model:value="appStore.frpcPath"
+                placeholder="点击右侧按钮选择 frpc"
+                readonly
+              >
+                <template #suffix>
+                  <a-button type="link" @click="appStore.pickFrpcPath()">
+                    <template #icon><FolderOpenOutlined /></template>
+                  </a-button>
+                </template>
+              </a-input>
+            </a-form-item>
+            <a-form-item label="配置文件">
+              <a-input
+                v-model:value="appStore.configPath"
+                placeholder="点击右侧按钮选择保存位置"
+                readonly
+              >
+                <template #suffix>
+                  <a-button type="link" @click="appStore.pickConfigPath()">
+                    <template #icon><FolderOpenOutlined /></template>
+                  </a-button>
+                </template>
+              </a-input>
+            </a-form-item>
+            <a-form-item label="日志目录">
+              <a-input
+                v-model:value="appStore.logPath"
+                placeholder="点击右侧按钮选择目录"
+                readonly
+              >
+                <template #suffix>
+                  <a-button type="link" @click="appStore.pickLogPath()">
+                    <template #icon><FolderOpenOutlined /></template>
+                  </a-button>
+                </template>
+              </a-input>
+            </a-form-item>
+          </a-form>
+        </a-tab-pane>
+
+        <!-- 高级配置 -->
+        <a-tab-pane key="advanced" tab="高级">
+          <a-form layout="vertical" :wrapper-col="{ span: 12 }">
+            <a-form-item label="传输协议">
+              <a-select v-model:value="transportProtocol" style="width: 200px">
+                <a-select-option v-for="p in transportProtocols" :key="p.value" :value="p.value">
+                  {{ p.label }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+            
+            <a-divider orientation="left">TLS 配置</a-divider>
+            
+            <a-form-item label="启用 TLS">
+              <a-switch v-model:checked="tlsEnable" checked-children="开" un-checked-children="关" />
+            </a-form-item>
+            
+            <template v-if="tlsEnable">
+              <a-form-item label="证书文件">
+                <a-input
+                  v-model:value="tlsCertFile"
+                  placeholder="选择证书文件 (.crt/.pem)"
+                  readonly
+                >
+                  <template #suffix>
+                    <a-button type="link" @click="pickFile('certFile', ['crt', 'pem'])">
+                      <template #icon><FolderOpenOutlined /></template>
+                    </a-button>
+                  </template>
+                </a-input>
+              </a-form-item>
+              
+              <a-form-item label="密钥文件">
+                <a-input
+                  v-model:value="tlsKeyFile"
+                  placeholder="选择密钥文件 (.key/.pem)"
+                  readonly
+                >
+                  <template #suffix>
+                    <a-button type="link" @click="pickFile('keyFile', ['key', 'pem'])">
+                      <template #icon><FolderOpenOutlined /></template>
+                    </a-button>
+                  </template>
+                </a-input>
+              </a-form-item>
+              
+              <a-form-item label="CA 文件">
+                <a-input
+                  v-model:value="tlsCaFile"
+                  placeholder="选择 CA 文件 (.crt/.pem)"
+                  readonly
+                >
+                  <template #suffix>
+                    <a-button type="link" @click="pickFile('caFile', ['crt', 'pem'])">
+                      <template #icon><FolderOpenOutlined /></template>
+                    </a-button>
+                  </template>
+                </a-input>
+              </a-form-item>
+            </template>
+            
+            <a-divider orientation="left">心跳配置</a-divider>
+            
+            <a-row :gutter="24">
+              <a-col :span="12">
+                <a-form-item label="心跳间隔 (秒)">
+                  <a-input-number v-model:value="heartbeatInterval" :min="0" style="width: 100%" placeholder="默认 30" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="心跳超时 (秒)">
+                  <a-input-number v-model:value="heartbeatTimeout" :min="0" style="width: 100%" placeholder="默认 90" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            
+            <a-divider orientation="left">日志配置</a-divider>
+            
+            <a-row :gutter="24">
+              <a-col :span="12">
+                <a-form-item label="日志级别">
+                  <a-select v-model:value="logLevel" style="width: 200px">
+                    <a-select-option v-for="l in logLevels" :key="l.value" :value="l.value">
+                      {{ l.label }}
+                    </a-select-option>
+                  </a-select>
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="日志保留天数">
+                  <a-input-number v-model:value="logMaxDays" :min="0" style="width: 200px" placeholder="默认 3" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            
+            <a-divider orientation="left">管理控制台</a-divider>
+            
+            <a-row :gutter="24">
+              <a-col :span="12">
+                <a-form-item label="管理地址">
+                  <a-input v-model:value="adminAddr" placeholder="127.0.0.1" style="width: 200px" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="管理端口">
+                  <a-input-number v-model:value="adminPort" :min="0" :max="65535" style="width: 200px" placeholder="7400" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            
+            <a-row :gutter="24">
+              <a-col :span="12">
+                <a-form-item label="管理用户">
+                  <a-input v-model:value="adminUser" placeholder="可选" style="width: 200px" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="管理密码">
+                  <a-input-password v-model:value="adminPassword" placeholder="可选" style="width: 200px" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+          </a-form>
+        </a-tab-pane>
+
+        <!-- 数据管理 -->
+        <a-tab-pane key="data" tab="数据">
+          <div class="data-management">
+            <a-space direction="vertical" size="large">
+              <a-button block size="large" @click="appStore.openAppData()">
+                <template #icon><FolderOpenOutlined /></template>
+                打开数据目录
+              </a-button>
+              
+              <a-divider>配置分享</a-divider>
+              
+              <a-space direction="vertical" style="width: 100%">
+                <a-button block size="large" @click="handleExportBase64">
+                  <template #icon><ExportOutlined /></template>
+                  Base64 导出配置
+                </a-button>
+                <a-button block size="large" @click="handleImportBase64">
+                  <template #icon><ImportOutlined /></template>
+                  Base64 导入配置
+                </a-button>
+              </a-space>
+              
+              <a-divider danger>危险操作</a-divider>
+              
+              <a-button block danger size="large" @click="handleReset">
+                <template #icon><CheckCircleOutlined /></template>
+                一键清空所有配置
+              </a-button>
             </a-space>
-          </a-form-item>
-        </a-form>
-      </a-tab-pane>
-
-      <!-- 路径设置 -->
-      <a-tab-pane key="paths" tab="路径">
-        <a-form layout="vertical" style="max-width: 500px">
-          <a-form-item label="FRP 可执行文件">
-            <a-input
-              v-model:value="appStore.frpcPath"
-              placeholder="点击右侧按钮选择 frpc"
-              readonly
-            >
-              <template #suffix>
-                <a-button type="text" @click="appStore.pickFrpcPath()">
-                  <template #icon><FolderOpenOutlined /></template>
-                </a-button>
-              </template>
-            </a-input>
-          </a-form-item>
-          <a-form-item label="配置文件">
-            <a-input
-              v-model:value="appStore.configPath"
-              placeholder="点击右侧按钮选择保存位置"
-              readonly
-            >
-              <template #suffix>
-                <a-button type="text" @click="appStore.pickConfigPath()">
-                  <template #icon><FolderOpenOutlined /></template>
-                </a-button>
-              </template>
-            </a-input>
-          </a-form-item>
-          <a-form-item label="日志目录">
-            <a-input
-              v-model:value="appStore.logPath"
-              placeholder="点击右侧按钮选择目录"
-              readonly
-            >
-              <template #suffix>
-                <a-button type="text" @click="appStore.pickLogPath()">
-                  <template #icon><FolderOpenOutlined /></template>
-                </a-button>
-              </template>
-            </a-input>
-          </a-form-item>
-        </a-form>
-      </a-tab-pane>
-
-      <!-- 高级配置 -->
-      <a-tab-pane key="advanced" tab="高级">
-        <a-form layout="vertical" style="max-width: 500px">
-          <a-form-item label="传输协议">
-            <a-select v-model:value="transportProtocol" style="width: 100%">
-              <a-select-option v-for="p in transportProtocols" :key="p.value" :value="p.value">
-                {{ p.label }}
-              </a-select-option>
-            </a-select>
-          </a-form-item>
-          
-          <a-divider orientation="left">TLS 配置</a-divider>
-          
-          <a-form-item label="启用 TLS">
-            <a-switch v-model:checked="tlsEnable" />
-          </a-form-item>
-          
-          <a-form-item label="证书文件" v-if="tlsEnable">
-            <a-input
-              v-model:value="tlsCertFile"
-              placeholder="选择证书文件"
-              readonly
-            >
-              <template #suffix>
-                <a-button type="text" @click="pickFile('certFile', ['crt', 'pem'])">
-                  <template #icon><FolderOpenOutlined /></template>
-                </a-button>
-              </template>
-            </a-input>
-          </a-form-item>
-          
-          <a-form-item label="密钥文件" v-if="tlsEnable">
-            <a-input
-              v-model:value="tlsKeyFile"
-              placeholder="选择密钥文件"
-              readonly
-            >
-              <template #suffix>
-                <a-button type="text" @click="pickFile('keyFile', ['key', 'pem'])">
-                  <template #icon><FolderOpenOutlined /></template>
-                </a-button>
-              </template>
-            </a-input>
-          </a-form-item>
-          
-          <a-form-item label="CA 文件" v-if="tlsEnable">
-            <a-input
-              v-model:value="tlsCaFile"
-              placeholder="选择 CA 文件"
-              readonly
-            >
-              <template #suffix>
-                <a-button type="text" @click="pickFile('caFile', ['crt', 'pem'])">
-                  <template #icon><FolderOpenOutlined /></template>
-                </a-button>
-              </template>
-            </a-input>
-          </a-form-item>
-          
-          <a-divider orientation="left">心跳配置</a-divider>
-          
-          <a-row :gutter="16">
-            <a-col :span="12">
-              <a-form-item label="心跳间隔 (秒)">
-                <a-input-number v-model:value="heartbeatInterval" :min="0" style="width: 100%" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="12">
-              <a-form-item label="心跳超时 (秒)">
-                <a-input-number v-model:value="heartbeatTimeout" :min="0" style="width: 100%" />
-              </a-form-item>
-            </a-col>
-          </a-row>
-          
-          <a-divider orientation="left">日志配置</a-divider>
-          
-          <a-form-item label="日志级别">
-            <a-select v-model:value="logLevel" style="width: 100%">
-              <a-select-option v-for="l in logLevels" :key="l.value" :value="l.value">
-                {{ l.label }}
-              </a-select-option>
-            </a-select>
-          </a-form-item>
-          
-          <a-form-item label="日志保留天数">
-            <a-input-number v-model:value="logMaxDays" :min="0" style="width: 100%" />
-          </a-form-item>
-          
-          <a-divider orientation="left">管理控制台</a-divider>
-          
-          <a-row :gutter="16">
-            <a-col :span="12">
-              <a-form-item label="管理地址">
-                <a-input v-model:value="adminAddr" placeholder="127.0.0.1" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="12">
-              <a-form-item label="管理端口">
-                <a-input-number v-model:value="adminPort" :min="0" :max="65535" style="width: 100%" />
-              </a-form-item>
-            </a-col>
-          </a-row>
-          
-          <a-row :gutter="16">
-            <a-col :span="12">
-              <a-form-item label="管理用户">
-                <a-input v-model:value="adminUser" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="12">
-              <a-form-item label="管理密码">
-                <a-input-password v-model:value="adminPassword" />
-              </a-form-item>
-            </a-col>
-          </a-row>
-        </a-form>
-      </a-tab-pane>
-
-      <!-- 数据管理 -->
-      <a-tab-pane key="data" tab="数据">
-        <a-space direction="vertical" style="width: 100%">
-          <a-button block @click="appStore.openAppData()">打开数据目录</a-button>
-          <a-button block @click="handleExportBase64">
-            <template #icon><ExportOutlined /></template>
-            Base64 导出配置
-          </a-button>
-          <a-button block @click="handleImportBase64">
-            <template #icon><ImportOutlined /></template>
-            Base64 导入配置
-          </a-button>
-          <a-divider />
-          <a-button block danger @click="handleReset">一键清空所有配置</a-button>
-        </a-space>
-      </a-tab-pane>
-    </a-tabs>
+          </div>
+        </a-tab-pane>
+      </a-tabs>
+    </a-card>
 
     <!-- Base64 配置对话框 -->
     <a-modal
@@ -436,14 +463,14 @@ async function pickFile(field: string, ext: string[]) {
       @ok="base64Mode === 'import' ? handleParseBase64() : base64DialogVisible = false"
     >
       <div v-if="base64Mode === 'export'">
-        <p>复制以下 Base64 字符串分享给他人：</p>
+        <p class="modal-desc">复制以下 Base64 字符串分享给他人：</p>
         <a-textarea
           v-model:value="base64Text"
           :rows="10"
           readonly
-          style="font-family: monospace; font-size: 12px;"
+          class="base64-textarea"
         />
-        <div style="margin-top: 16px; text-align: right;">
+        <div class="modal-actions">
           <a-button type="primary" @click="handleCopyBase64">
             <template #icon><CopyOutlined /></template>
             复制
@@ -452,14 +479,14 @@ async function pickFile(field: string, ext: string[]) {
       </div>
       
       <div v-else>
-        <p>粘贴 Base64 配置字符串：</p>
+        <p class="modal-desc">粘贴 Base64 配置字符串：</p>
         <a-textarea
           v-model:value="base64Text"
           :rows="10"
           placeholder="frp://..."
-          style="font-family: monospace; font-size: 12px;"
+          class="base64-textarea"
         />
-        <div style="margin-top: 16px; text-align: right;">
+        <div class="modal-actions">
           <a-button @click="handlePasteBase64">
             <template #icon><SnippetsOutlined /></template>
             从剪贴板粘贴
@@ -471,6 +498,68 @@ async function pickFile(field: string, ext: string[]) {
 </template>
 
 <style scoped lang="scss">
-.settings-page { padding: 24px; height: calc(100vh - 60px); overflow-y: auto; }
-.page-title { font-size: 24px; font-weight: 600; margin-bottom: 24px; }
+.settings-page {
+  padding: 24px;
+  height: calc(100vh - 60px);
+  overflow-y: auto;
+  background: #f5f7fa;
+}
+
+.page-header {
+  margin-bottom: 16px;
+}
+
+.page-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: #1f1f1f;
+  margin: 0;
+}
+
+:deep(.ant-card) {
+  margin-bottom: 16px;
+}
+
+:deep(.ant-tabs-card) {
+  .ant-tabs-nav {
+    margin-bottom: 24px;
+  }
+  
+  .ant-tabs-tab {
+    padding: 12px 24px;
+    font-size: 14px;
+  }
+}
+
+:deep(.ant-form-item) {
+  margin-bottom: 20px;
+  
+  .ant-form-item-label {
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+}
+
+.data-management {
+  max-width: 500px;
+  margin: 0 auto;
+  padding: 24px 0;
+}
+
+.modal-desc {
+  color: #666;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.base64-textarea {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  background: #f5f5f5;
+}
+
+.modal-actions {
+  margin-top: 16px;
+  text-align: right;
+}
 </style>
