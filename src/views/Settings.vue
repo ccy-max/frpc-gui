@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { useAppStore } from '@/stores/app';
-import { FolderOutlined } from '@ant-design/icons-vue';
+import { FolderOpenOutlined } from '@ant-design/icons-vue';
+import { message } from 'ant-design-vue';
+import { h } from 'vue';
 
 const appStore = useAppStore();
 
-function handleConfigChange() {
-  if (appStore.frpConfig) {
-    appStore.saveConfig(appStore.frpConfig);
-  }
+async function handleConfigChange() {
+  await appStore.saveSettings();
+  message.success('设置已保存');
 }
 </script>
 
@@ -32,25 +33,51 @@ function handleConfigChange() {
               </a-select>
             </a-form-item>
             <a-form-item label="开机自启">
-              <a-switch v-model:checked="appStore.processStatus.running" />
+              <a-switch v-model:checked="appStore.autoStart" @change="handleConfigChange" />
+            </a-form-item>
+            <a-form-item label="最小化到托盘">
+              <a-switch v-model:checked="appStore.minimizeToTray" @change="handleConfigChange" />
+            </a-form-item>
+            <a-form-item label="关闭到托盘">
+              <a-switch v-model:checked="appStore.closeToTray" @change="handleConfigChange" />
             </a-form-item>
           </a-form>
         </a-card>
       </a-col>
+
       <a-col :span="12">
         <a-card title="路径设置">
           <a-form layout="vertical" style="max-width: 400px">
-            <a-form-item label="FRP 路径">
-              <a-input readonly placeholder="请选择 frpc 可执行文件路径">
+            <a-form-item label="FRP 可执行文件路径">
+              <a-input
+                v-model:value="appStore.frpcPath"
+                placeholder="点击右侧按钮选择 frpc 可执行文件"
+                readonly
+              >
                 <template #addonAfter>
-                  <a-button :icon="h(FolderOutlined)" size="small">浏览</a-button>
+                  <a-button :icon="h(FolderOpenOutlined)" size="small" @click="appStore.pickFrpcPath()" type="text" />
                 </template>
               </a-input>
             </a-form-item>
-            <a-form-item label="配置路径">
-              <a-input readonly placeholder="frpc.toml 保存路径">
+            <a-form-item label="配置文件路径">
+              <a-input
+                v-model:value="appStore.configPath"
+                placeholder="点击右侧按钮选择配置文件保存位置"
+                readonly
+              >
                 <template #addonAfter>
-                  <a-button :icon="h(FolderOutlined)" size="small">浏览</a-button>
+                  <a-button :icon="h(FolderOpenOutlined)" size="small" @click="appStore.pickConfigPath()" type="text" />
+                </template>
+              </a-input>
+            </a-form-item>
+            <a-form-item label="日志目录">
+              <a-input
+                v-model:value="appStore.logPath"
+                placeholder="点击右侧按钮选择日志目录"
+                readonly
+              >
+                <template #addonAfter>
+                  <a-button :icon="h(FolderOpenOutlined)" size="small" @click="appStore.pickLogPath()" type="text" />
                 </template>
               </a-input>
             </a-form-item>
@@ -60,12 +87,6 @@ function handleConfigChange() {
     </a-row>
   </div>
 </template>
-
-<script lang="ts">
-import { h } from 'vue';
-import { FolderOutlined } from '@ant-design/icons-vue';
-export default { methods: { h } };
-</script>
 
 <style scoped lang="scss">
 .settings-page { padding: 24px; height: calc(100vh - 60px); overflow-y: auto; }

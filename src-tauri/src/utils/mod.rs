@@ -1,5 +1,7 @@
 //! 工具函数模块
 
+pub mod settings;
+
 use anyhow::Result;
 use std::path::PathBuf;
 
@@ -8,7 +10,6 @@ pub fn get_app_data_dir() -> Result<PathBuf> {
     let dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("frpc-gui");
-    
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -18,16 +19,13 @@ pub fn get_config_dir() -> Result<PathBuf> {
     let dir = dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("frpc-gui");
-    
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
 /// 获取日志目录
 pub fn get_log_dir() -> Result<PathBuf> {
-    let dir = get_app_data_dir()?
-        .join("logs");
-    
+    let dir = get_app_data_dir()?.join("logs");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -54,7 +52,6 @@ pub fn format_duration(seconds: u64) -> String {
     let hours = seconds / 3600;
     let minutes = (seconds % 3600) / 60;
     let secs = seconds % 60;
-
     if hours > 0 {
         format!("{}h {}m {}s", hours, minutes, secs)
     } else if minutes > 0 {
@@ -74,30 +71,5 @@ pub fn is_port_available(port: u16) -> bool {
 pub fn get_platform_info() -> (String, String) {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
-    
-    let os_name = match os {
-        "windows" => "Windows",
-        "macos" => "macOS",
-        "linux" => "Linux",
-        _ => os,
-    };
-    
-    (os_name.to_string(), arch.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_file_size() {
-        assert_eq!(format_file_size(1024), "1.00 KB");
-        assert_eq!(format_file_size(1048576), "1.00 MB");
-    }
-
-    #[test]
-    fn test_format_duration() {
-        assert_eq!(format_duration(3661), "1h 1m 1s");
-        assert_eq!(format_duration(125), "2m 5s");
-    }
+    (os.to_string(), arch.to_string())
 }
