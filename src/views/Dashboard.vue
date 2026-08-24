@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch, h } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter } from 'vue-router';
 import {
@@ -8,10 +8,10 @@ import {
   PauseCircleOutlined,
   FileTextOutlined,
   SettingOutlined,
-  CloudServerOutlined,
-  ThunderboltOutlined,
   CheckCircleOutlined,
-  ClockCircleOutlined
+  ClockCircleOutlined,
+  CloudServerOutlined,
+  ThunderboltOutlined
 } from '@ant-design/icons-vue';
 
 const appStore = useAppStore();
@@ -24,7 +24,7 @@ const stats = computed(() => [
   {
     title: '运行状态',
     value: appStore.isRunning ? '运行中' : '已停止',
-    prefix: appStore.isRunning ? h(CheckCircleOutlined) : h(CloudServerOutlined),
+    prefix: h(CheckCircleOutlined),
     valueStyle: { color: appStore.isRunning ? '#52c41a' : '#8c8c8c' }
   },
   {
@@ -82,11 +82,6 @@ watch(() => appStore.isRunning, (newVal) => {
 
 const recentLogs = computed(() => appStore.logs.slice(-5).reverse());
 const logColors: Record<string, string> = { debug: 'purple', info: 'blue', warn: 'orange', error: 'red' };
-
-// 简单的 h 函数用于图标
-function h(component: any) {
-  return { component };
-}
 </script>
 
 <template>
