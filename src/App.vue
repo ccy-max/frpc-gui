@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/app';
 const appStore = useAppStore();
 
 onMounted(async () => {
+  appStore.init();
   await appStore.loadConfig();
 });
 </script>

@@ -5,7 +5,9 @@ import { Folder } from '@element-plus/icons-vue';
 const appStore = useAppStore();
 
 function handleConfigChange() {
-  appStore.saveConfig(appStore.frpConfig || {} as any);
+  if (appStore.frpConfig) {
+    appStore.saveConfig(appStore.frpConfig);
+  }
 }
 </script>
 

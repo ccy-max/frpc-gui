@@ -65,13 +65,6 @@ pub fn format_duration(seconds: u64) -> String {
 }
 
 /// 检查端口是否可用
-#[cfg(unix)]
-pub fn is_port_available(port: u16) -> bool {
-    use std::net::TcpListener;
-    TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok()
-}
-
-#[cfg(windows)]
 pub fn is_port_available(port: u16) -> bool {
     use std::net::TcpListener;
     TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok()

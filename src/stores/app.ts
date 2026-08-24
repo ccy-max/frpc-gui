@@ -233,10 +233,13 @@ export const useAppStore = defineStore('app', () => {
   }
   
   // 初始化
+  let statusTimer: ReturnType<typeof setInterval> | null = null;
   function init() {
     applyTheme(theme.value);
-    // 定期刷新进程状态
-    setInterval(refreshProcessStatus, 5000);
+    // 定期刷新进程状态（避免重复创建定时器）
+    if (statusTimer === null) {
+      statusTimer = setInterval(refreshProcessStatus, 5000);
+    }
   }
   
   return {

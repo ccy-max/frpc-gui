@@ -30,7 +30,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: package-lock.json
 
@@ -116,7 +116,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: package-lock.json
 
@@ -194,7 +194,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: package-lock.json
 
@@ -233,7 +233,7 @@ jobs:
         with:
           files: |
             src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/app/*.app
+            src-tauri/target/release/bundle/macos/*.app
           body: |
             ## 🎉 FRPC GUI ${{ github.ref_name }} - macOS
             

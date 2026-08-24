@@ -4,9 +4,9 @@ use super::config::FrpConfig;
 use anyhow::{Context, Result};
 use log::{error, info};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 /// 进程状态
@@ -23,6 +23,7 @@ pub enum ProcessState {
 pub struct FrpProcessManager {
     running: Arc<AtomicBool>,
     pid: Arc<AtomicU32>,
+    child: Arc<Mutex<Option<Child>>>,
     log_tx: mpsc::Sender<String>,
     frpc_path: PathBuf,
     config_path: PathBuf,
@@ -33,6 +34,7 @@ impl FrpProcessManager {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             pid: Arc::new(AtomicU32::new(0)),
+            child: Arc::new(Mutex::new(None)),
             log_tx,
             frpc_path,
             config_path,
@@ -60,23 +62,56 @@ impl FrpProcessManager {
             .stderr(Stdio::piped());
 
         match cmd.spawn() {
-            Ok(child) => {
+            Ok(mut child) => {
                 let pid = child.id();
                 info!("FRP process started with PID: {}", pid);
-                
+
                 self.running.store(true, Ordering::SeqCst);
                 self.pid.store(pid, Ordering::SeqCst);
-                
-                // 启动日志捕获任务
-                let log_tx = self.log_tx.clone();
-                let running = self.running.clone();
-                tokio::spawn(async move {
-                    // 简单等待进程结束
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                    if running.load(Ordering::SeqCst) {
-                        let _ = log_tx.send("[FRP] 进程运行中".to_string()).await;
-                    }
-                });
+
+                // 提取 stdout 和 stderr 用于异步读取
+                let stdout = child.stdout.take();
+                let stderr = child.stderr.take();
+
+                // 保存子进程句柄
+                *self.child.lock().unwrap() = Some(child);
+
+                // 启动日志捕获任务（使用标准线程读取管道）
+                if let Some(stdout) = stdout {
+                    let log_tx = self.log_tx.clone();
+                    tokio::spawn(async move {
+                        use std::io::{BufRead, BufReader};
+                        let reader = BufReader::new(stdout);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(text) => {
+                                    if log_tx.send(format!("[FRP] {}", text)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
+
+                if let Some(stderr) = stderr {
+                    let log_tx = self.log_tx.clone();
+                    tokio::spawn(async move {
+                        use std::io::{BufRead, BufReader};
+                        let reader = BufReader::new(stderr);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(text) => {
+                                    if log_tx.send(format!("[FRP] {}", text)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    });
+                }
 
                 Ok(())
             }
@@ -94,10 +129,11 @@ impl FrpProcessManager {
         }
 
         info!("Stopping FRP process");
-        
+
+        let pid = self.pid.load(Ordering::SeqCst);
+
         #[cfg(windows)]
         {
-            let pid = self.pid.load(Ordering::SeqCst);
             if pid > 0 {
                 Command::new("taskkill")
                     .args(["/F", "/T", "/PID"])
@@ -106,10 +142,9 @@ impl FrpProcessManager {
                     .ok();
             }
         }
-        
+
         #[cfg(unix)]
         {
-            let pid = self.pid.load(Ordering::SeqCst);
             if pid > 0 {
                 Command::new("kill")
                     .arg("-TERM")
@@ -119,9 +154,15 @@ impl FrpProcessManager {
             }
         }
 
+        // 关闭子进程句柄
+        if let Some(mut child) = self.child.lock().unwrap().take() {
+            child.kill().ok();
+            child.wait().ok();
+        }
+
         self.running.store(false, Ordering::SeqCst);
         self.pid.store(0, Ordering::SeqCst);
-        
+
         Ok(())
     }
 
@@ -159,7 +200,7 @@ pub fn get_frpc_version(path: &Path) -> Result<String> {
         .arg("-v")
         .output()
         .with_context(|| "Failed to execute frpc -v")?;
-    
+
     let version = String::from_utf8_lossy(&output.stdout);
     Ok(version.trim().to_string())
 }

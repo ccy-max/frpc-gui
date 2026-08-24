@@ -7,7 +7,7 @@ mod commands;
 mod frp;
 mod utils;
 
-use commands::{init_app, *};
+use commands::*;
 use log::info;
 use tauri::Manager;
 

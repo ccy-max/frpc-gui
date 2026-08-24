@@ -151,7 +151,11 @@ pub async fn start_frp(config: FrpConfig, state: State<'_, AppState>) -> Result<
     let mut process_manager = state.process_manager.lock().await;
     
     // 从应用配置目录获取 frpc 路径
-    let frpc_path = std::env::var("FRPC_PATH").unwrap_or_else(|_| "frpc".to_string());
+    #[cfg(windows)]
+    let default_frpc = "frpc.exe";
+    #[cfg(not(windows))]
+    let default_frpc = "frpc";
+    let frpc_path = std::env::var("FRPC_PATH").unwrap_or_else(|_| default_frpc.to_string());
     let config_dir = dirs::config_dir()
         .map(|d| d.join("frpc-gui"))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -220,8 +224,8 @@ pub async fn get_process_status(state: State<'_, AppState>) -> Result<ProcessSta
     
     match process_manager.as_ref() {
         Some(pm) => {
-            let state = pm.get_state();
-            let (running, pid, state_str) = match state {
+            let proc_state = pm.get_state();
+            let (running, pid, state_str) = match proc_state {
                 ProcessState::Running { pid } => (true, Some(pid), "running".to_string()),
                 ProcessState::Starting => (false, None, "starting".to_string()),
                 ProcessState::Stopping => (false, None, "stopping".to_string()),
