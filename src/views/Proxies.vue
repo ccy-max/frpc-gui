@@ -138,6 +138,28 @@ const proxies = computed(() => appStore.proxies);
 // 显示高级选项
 const showAdvanced = ref(false);
 
+// 端口选择器
+const portSelectorVisible = ref(false);
+const portSelectorTarget = ref<'local' | 'remote'>('local');
+
+async function openPortSelector(target: 'local' | 'remote') {
+  portSelectorTarget.value = target;
+  const ports = await appStore.loadLocalPorts();
+  portList.value = ports;
+  portSelectorVisible.value = true;
+}
+
+function selectPort(port: number) {
+  if (portSelectorTarget.value === 'local') {
+    form.value.local_port = port;
+  } else {
+    form.value.remote_port = port;
+  }
+  portSelectorVisible.value = false;
+}
+
+const portList = ref<any[]>([]);
+
 // 根据类型显示不同字段
 const isHttpType = computed(() => ['http', 'https'].includes(form.value.type));
 const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.type));
@@ -199,12 +221,18 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
           </a-col>
           <a-col :span="8">
             <a-form-item label="本地端口">
-              <a-input-number v-model:value="form.local_port" :min="1" :max="65535" style="width: 100%" />
+              <a-space style="width: 100%">
+                <a-input-number v-model:value="form.local_port" :min="1" :max="65535" style="width: 100%" />
+                <a-button @click="openPortSelector('local')">选择</a-button>
+              </a-space>
             </a-form-item>
           </a-col>
           <a-col :span="8">
             <a-form-item label="远程端口">
-              <a-input-number v-model:value="form.remote_port" :min="1" :max="65535" style="width: 100%" />
+              <a-space style="width: 100%">
+                <a-input-number v-model:value="form.remote_port" :min="1" :max="65535" style="width: 100%" />
+                <a-button @click="openPortSelector('remote')">选择</a-button>
+              </a-space>
             </a-form-item>
           </a-col>
         </a-row>
@@ -330,6 +358,25 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
           <a-checkbox v-model:checked="form.use_compression">启用压缩</a-checkbox>
         </a-space>
       </a-form>
+    </a-modal>
+
+    <!-- 端口选择器 -->
+    <a-modal v-model:open="portSelectorVisible" title="选择端口" @ok="portSelectorVisible = false" width="500px">
+      <a-empty v-if="portList.length === 0" description="暂无监听端口" />
+      <a-table v-else :data-source="portList" :pagination="false" size="small" @rowClick="(_, __, event) => {
+        const target = event.target as HTMLElement;
+        if (target.tagName !== 'BUTTON') selectPort(portList[0].port);
+      }">
+        <template #columns>
+          <a-table-column title="协议" dataIndex="protocol" width="80" />
+          <a-table-column title="IP" dataIndex="ip" />
+          <a-table-column title="端口" dataIndex="port" width="80">
+            <template #bodyCell="{ record }">
+              <a-button size="small" @click="selectPort(record.port)">选择</a-button>
+            </template>
+          </a-table-column>
+        </template>
+      </a-table>
     </a-modal>
   </div>
 </template>

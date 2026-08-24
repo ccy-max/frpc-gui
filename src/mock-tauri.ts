@@ -189,10 +189,17 @@ if (isBrowser) {
           return 'v0.1.0';
         
         case 'get_local_ports':
+          // 模拟本地监听端口
           return [
             { protocol: 'TCP', ip: '0.0.0.0', port: 80 },
             { protocol: 'TCP', ip: '0.0.0.0', port: 443 },
+            { protocol: 'TCP', ip: '0.0.0.0', port: 8080 },
+            { protocol: 'TCP', ip: '0.0.0.0', port: 3000 },
             { protocol: 'TCP', ip: '127.0.0.1', port: 3306 },
+            { protocol: 'TCP', ip: '127.0.0.1', port: 5432 },
+            { protocol: 'TCP', ip: '127.0.0.1', port: 6379 },
+            { protocol: 'TCP', ip: '127.0.0.1', port: 27017 },
+            { protocol: 'UDP', ip: '0.0.0.0', port: 53 },
           ];
         
         default:
