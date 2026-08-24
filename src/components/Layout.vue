@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useAppStore } from '@/stores/app';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import {
   DashboardOutlined,
   CloudServerOutlined,
@@ -14,8 +14,17 @@ import {
 
 const appStore = useAppStore();
 const router = useRouter();
+const route = useRoute();
 
 const activeMenu = ref('dashboard');
+
+// 监听路由变化，同步菜单选中状态
+watch(() => route.path, (newPath) => {
+  const path = newPath.replace('/', '');
+  if (path && menuItems.some(item => item.key === path)) {
+    activeMenu.value = path;
+  }
+}, { immediate: true });
 
 const menuItems = [
   { key: 'dashboard', icon: DashboardOutlined, label: '概览' },
@@ -28,7 +37,6 @@ const menuItems = [
 ];
 
 const handleMenuSelect = ({ key }: { key: string }) => {
-  activeMenu.value = key;
   router.push(`/${key}`);
 };
 </script>
