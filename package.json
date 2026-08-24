@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:win": "tauri build && node scripts/copy-webview2-dll.js"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
