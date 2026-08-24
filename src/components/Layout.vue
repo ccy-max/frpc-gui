@@ -18,14 +18,6 @@ const route = useRoute();
 
 const activeMenu = ref('dashboard');
 
-// 监听路由变化，同步菜单选中状态
-watch(() => route.path, (newPath) => {
-  const path = newPath.replace('/', '');
-  if (path && menuItems.some(item => item.key === path)) {
-    activeMenu.value = path;
-  }
-}, { immediate: true });
-
 const menuItems = [
   { key: 'dashboard', icon: DashboardOutlined, label: '概览' },
   { key: 'servers', icon: CloudServerOutlined, label: '服务器管理' },
@@ -35,6 +27,14 @@ const menuItems = [
   { key: 'settings', icon: SettingOutlined, label: '设置' },
   { key: 'about', icon: InfoCircleOutlined, label: '关于' },
 ];
+
+// 监听路由变化，同步菜单选中状态
+watch(() => route.path, (newPath) => {
+  const path = newPath.replace('/', '');
+  if (path && menuItems.some(item => item.key === path)) {
+    activeMenu.value = path;
+  }
+}, { immediate: true });
 
 const handleMenuSelect = ({ key }: { key: string }) => {
   router.push(`/${key}`);
