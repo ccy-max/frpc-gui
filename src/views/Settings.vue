@@ -14,7 +14,7 @@ import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager';
 
 const appStore = useAppStore();
 
-const activeTab = ref('basic');
+const activeTab = ref('general');
 
 // ===== 选项数据 =====
 const transportProtocols = [
@@ -223,10 +223,9 @@ async function pickFile(field: string, ext: string[]) {
       <h2 class="page-title">设置</h2>
     </div>
     
-    <a-card :bordered="false">
-      <a-tabs v-model:activeKey="activeTab" type="card">
-        <!-- 通用设置 -->
-        <a-tab-pane key="general" tab="通用">
+    <a-tabs v-model:activeKey="activeTab">
+      <!-- 通用设置 -->
+      <a-tab-pane key="general" tab="通用">
           <a-form layout="vertical" :wrapper-col="{ span: 12 }">
             <a-form-item label="语言">
               <a-select v-model:value="appStore.language" @change="handleConfigChange" style="width: 200px">
@@ -453,7 +452,6 @@ async function pickFile(field: string, ext: string[]) {
           </div>
         </a-tab-pane>
       </a-tabs>
-    </a-card>
 
     <!-- Base64 配置对话框 -->
     <a-modal
@@ -502,11 +500,10 @@ async function pickFile(field: string, ext: string[]) {
   padding: 24px;
   height: calc(100vh - 60px);
   overflow-y: auto;
-  background: #f5f7fa;
 }
 
 .page-header {
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 }
 
 .page-title {
@@ -516,28 +513,8 @@ async function pickFile(field: string, ext: string[]) {
   margin: 0;
 }
 
-:deep(.ant-card) {
-  margin-bottom: 16px;
-}
-
-:deep(.ant-tabs-card) {
-  .ant-tabs-nav {
-    margin-bottom: 24px;
-  }
-  
-  .ant-tabs-tab {
-    padding: 12px 24px;
-    font-size: 14px;
-  }
-}
-
-:deep(.ant-form-item) {
-  margin-bottom: 20px;
-  
-  .ant-form-item-label {
-    font-weight: 500;
-    margin-bottom: 8px;
-  }
+:deep(.ant-tabs) {
+  margin-top: 16px;
 }
 
 .data-management {
@@ -555,7 +532,6 @@ async function pickFile(field: string, ext: string[]) {
 .base64-textarea {
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12px;
-  background: #f5f5f5;
 }
 
 .modal-actions {
