@@ -135,6 +135,31 @@ async function toggleProxy(proxy: any) {
 
 const proxies = computed(() => appStore.proxies);
 
+// 搜索过滤
+const searchKeyword = ref('');
+const filteredProxies = computed(() => {
+  if (!searchKeyword.value.trim()) return proxies.value;
+  const kw = searchKeyword.value.toLowerCase();
+  return proxies.value.filter(p => 
+    p.name.toLowerCase().includes(kw) ||
+    p.type.toLowerCase().includes(kw)
+  );
+});
+
+// 随机名称生成
+function generateRandomName() {
+  const prefixes = ['proxy', 'svc', 'app', 'web', 'api', 'db', 'cache', 'mq'];
+  const suffixes = ['alpha', 'beta', 'gamma', 'delta', 'omega', 'prime', 'core', 'edge'];
+  const num = Math.floor(Math.random() * 1000);
+  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+  const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
+  return `${prefix}-${suffix}-${num}`;
+}
+
+function handleRandomName() {
+  form.value.name = generateRandomName();
+}
+
 // 显示高级选项
 const showAdvanced = ref(false);
 
@@ -169,13 +194,21 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
   <div class="proxies-page">
     <div class="page-header">
       <h2 class="page-title">代理管理</h2>
-      <a-button type="primary" @click="openAdd">
-        <template #icon><PlusOutlined /></template>
-        添加代理
-      </a-button>
+      <a-space>
+        <a-input
+          v-model:value="searchKeyword"
+          placeholder="搜索代理名称或类型..."
+          style="width: 250px"
+          allow-clear
+        />
+        <a-button type="primary" @click="openAdd">
+          <template #icon><PlusOutlined /></template>
+          添加代理
+        </a-button>
+      </a-space>
     </div>
 
-    <a-table :data-source="proxies" :columns="columns" row-key="name" :pagination="false" scroll-x="1000">
+    <a-table :data-source="filteredProxies" :columns="columns" row-key="name" :pagination="false" scroll-x="1000">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'type'">
           <a-tag color="blue">{{ record.type.toUpperCase() }}</a-tag>
@@ -201,7 +234,10 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="名称" required>
-              <a-input v-model:value="form.name" placeholder="请输入代理名称" />
+              <a-space style="width: 100%">
+                <a-input v-model:value="form.name" placeholder="请输入代理名称" style="flex: 1" />
+                <a-button @click="handleRandomName">随机生成</a-button>
+              </a-space>
             </a-form-item>
           </a-col>
           <a-col :span="12">

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useAppStore } from '@/stores/app';
-import { FolderOpenOutlined } from '@ant-design/icons-vue';
+import { FolderOpenOutlined, ExportOutlined, ImportOutlined, CopyOutlined, SnippetsOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
+import { invoke } from '@tauri-apps/api/core';
+import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager';
 
 const appStore = useAppStore();
 
@@ -90,6 +92,63 @@ const adminPassword = computed({
   get: () => appStore.frpConfig?.admin.password || '',
   set: (v) => { if (appStore.frpConfig) appStore.frpConfig.admin.password = v; }
 });
+
+// Base64 配置分享
+const base64DialogVisible = ref(false);
+const base64Mode = ref<'export' | 'import'>('export');
+const base64Text = ref('');
+
+async function handleExportBase64() {
+  base64Mode.value = 'export';
+  const config = appStore.frpConfig;
+  if (!config) {
+    message.warning('没有可导出的配置');
+    return;
+  }
+  const json = JSON.stringify(config, null, 2);
+  const base64 = btoa(unescape(encodeURIComponent(json)));
+  base64Text.value = base64;
+  base64DialogVisible.value = true;
+}
+
+async function handleCopyBase64() {
+  try {
+    await writeText(base64Text.value);
+    message.success('已复制到剪贴板');
+  } catch (e) {
+    message.error('复制失败');
+  }
+}
+
+async function handleImportBase64() {
+  base64Mode.value = 'import';
+  base64Text.value = '';
+  base64DialogVisible.value = true;
+}
+
+async function handlePasteBase64() {
+  try {
+    const text = await readText();
+    if (text) {
+      base64Text.value = text.replace('frp://', '');
+    }
+  } catch (e) {
+    message.error('读取剪贴板失败');
+  }
+}
+
+async function handleParseBase64() {
+  try {
+    const json = decodeURIComponent(escape(atob(base64Text.value)));
+    const config = JSON.parse(json);
+    appStore.frpConfig = config;
+    await appStore.saveConfig(config);
+    message.success('配置导入成功');
+    base64DialogVisible.value = false;
+  } catch (e) {
+    message.error('解析失败：配置格式不正确');
+  }
+}
 
 async function handleConfigChange() {
   await appStore.saveSettings();
@@ -325,10 +384,59 @@ async function pickFile(field: string, ext: string[]) {
       <a-tab-pane key="data" tab="数据">
         <a-space direction="vertical" style="width: 100%">
           <a-button block @click="appStore.openAppData()">打开数据目录</a-button>
+          <a-button block @click="handleExportBase64">
+            <template #icon><ExportOutlined /></template>
+            Base64 导出配置
+          </a-button>
+          <a-button block @click="handleImportBase64">
+            <template #icon><ImportOutlined /></template>
+            Base64 导入配置
+          </a-button>
+          <a-divider />
           <a-button block danger @click="handleReset">一键清空所有配置</a-button>
         </a-space>
       </a-tab-pane>
     </a-tabs>
+
+    <!-- Base64 配置对话框 -->
+    <a-modal
+      v-model:open="base64DialogVisible"
+      :title="base64Mode === 'export' ? '导出配置' : '导入配置'"
+      width="600px"
+      @ok="base64Mode === 'import' ? handleParseBase64() : base64DialogVisible = false"
+    >
+      <div v-if="base64Mode === 'export'">
+        <p>复制以下 Base64 字符串分享给他人：</p>
+        <a-textarea
+          v-model:value="base64Text"
+          :rows="10"
+          readonly
+          style="font-family: monospace; font-size: 12px;"
+        />
+        <div style="margin-top: 16px; text-align: right;">
+          <a-button type="primary" @click="handleCopyBase64">
+            <template #icon><CopyOutlined /></template>
+            复制
+          </a-button>
+        </div>
+      </div>
+      
+      <div v-else>
+        <p>粘贴 Base64 配置字符串：</p>
+        <a-textarea
+          v-model:value="base64Text"
+          :rows="10"
+          placeholder="frp://..."
+          style="font-family: monospace; font-size: 12px;"
+        />
+        <div style="margin-top: 16px; text-align: right;">
+          <a-button @click="handlePasteBase64">
+            <template #icon><SnippetsOutlined /></template>
+            从剪贴板粘贴
+          </a-button>
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
