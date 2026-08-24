@@ -5,7 +5,8 @@ import { useRouter } from 'vue-router';
 import {
   PlusOutlined, PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, ClockCircleOutlined,
-  CloudServerOutlined, ThunderboltOutlined
+  CloudServerOutlined, ThunderboltOutlined,
+  FileTextOutlined, SettingOutlined
 } from '@ant-design/icons-vue';
 
 const appStore = useAppStore();
