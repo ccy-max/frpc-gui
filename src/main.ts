@@ -1,3 +1,6 @@
+// 浏览器预览模式 - 加载 Mock 数据
+import './mock-tauri';
+
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import Antd from 'ant-design-vue';

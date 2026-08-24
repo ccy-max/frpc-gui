@@ -27,7 +27,7 @@ const menuItems = [
   { key: 'about', icon: InfoCircleOutlined, label: '关于' },
 ];
 
-const handleMenuSelect = (key: string) => {
+const handleMenuSelect = ({ key }: { key: string }) => {
   activeMenu.value = key;
   router.push(`/${key}`);
 };
@@ -46,7 +46,7 @@ const handleMenuSelect = (key: string) => {
         mode="inline"
         theme="dark"
         class="app-menu"
-        @click="handleMenuSelect"
+        @select="handleMenuSelect"
       >
         <a-menu-item v-for="item in menuItems" :key="item.key">
           <component :is="item.icon" />
