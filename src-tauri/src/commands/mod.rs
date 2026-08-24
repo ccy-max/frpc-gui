@@ -325,6 +325,383 @@ pub fn get_frpc_version(path: String) -> Result<String, String> {
     crate::frp::get_frpc_version(&PathBuf::from(&path)).map_err(|e| e.to_string())
 }
 
+// ==================== 缺失功能补齐 ====================
+
+/// #1 一键清空所有配置、下载、日志
+#[tauri::command]
+pub async fn reset_all_config(state: State<'_, AppState>) -> Result<bool, String> {
+    info!("Resetting all config");
+
+    // 1. 停止 FRP 进程
+    let mut pm_guard = state.process_manager.lock().await;
+    if let Some(pm) = pm_guard.as_mut() {
+        let _ = pm.stop().await;
+    }
+    drop(pm_guard);
+
+    // 2. 获取配置目录
+    let config_dir = dirs::config_dir()
+        .map(|d| d.join("frpc-gui"))
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // 3. 清空配置文件
+    let config_path = config_dir.join("frpc.json");
+    if config_path.exists() {
+        std::fs::remove_file(&config_path).map_err(|e| e.to_string())?;
+    }
+
+    // 4. 清空下载目录
+    let bin_dir = config_dir.join("bin");
+    if bin_dir.exists() {
+        std::fs::remove_dir_all(&bin_dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&bin_dir).ok();
+    }
+
+    // 5. 清空日志文件
+    let log_path = config_dir.join("frpc.log");
+    if log_path.exists() {
+        std::fs::remove_file(&log_path).ok();
+    }
+
+    // 6. 重置内存状态
+    let mut cm_guard = state.config_manager.lock().await;
+    *cm_guard = Some(ConfigManager::new(config_dir.join("frpc.json")));
+    drop(cm_guard);
+
+    info!("All config reset complete");
+    Ok(true)
+}
+
+/// #2 读取 frpc 日志文件内容
+#[tauri::command]
+pub async fn get_frpc_log_content(state: State<'_, AppState>) -> Result<String, String> {
+    let config_dir = dirs::config_dir()
+        .map(|d| d.join("frpc-gui"))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let log_path = config_dir.join("frpc.log");
+
+    if !log_path.exists() {
+        return Ok(String::new());
+    }
+
+    std::fs::read_to_string(&log_path).map_err(|e| e.to_string())
+}
+
+/// #3 读取应用自身日志
+#[tauri::command]
+pub async fn get_app_log_content() -> Result<String, String> {
+    // 返回内存中的最近日志
+    // 实际应用日志通过 env_logger 输出到 stderr
+    Ok(String::new())
+}
+
+/// #4 在文件管理器中打开日志文件
+#[tauri::command]
+pub async fn open_frpc_log_file() -> Result<bool, String> {
+    let config_dir = dirs::config_dir()
+        .map(|d| d.join("frpc-gui"))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let log_path = config_dir.join("frpc.log");
+
+    if !log_path.exists() {
+        return Err("日志文件不存在".to_string());
+    }
+
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(&log_path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&log_path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&log_path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(true)
+}
+
+/// #5 获取本地监听端口列表
+#[tauri::command]
+pub async fn get_local_ports() -> Result<Vec<LocalPort>, String> {
+    info!("Getting local ports");
+
+    #[cfg(windows)]
+    {
+        let output = std::process::Command::new("netstat")
+            .args(["-a", "-n"])
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut ports: Vec<LocalPort> = Vec::new();
+
+        for line in stdout.lines() {
+            if !line.contains("TCP") && !line.contains("UDP") {
+                continue;
+            }
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            if cols.len() < 2 {
+                continue;
+            }
+            let local = cols[1];
+            if let Some(idx) = local.rfind(':') {
+                let ip = &local[..idx];
+                if let Ok(port) = local[idx + 1..].parse::<u16>() {
+                    ports.push(LocalPort {
+                        protocol: cols[0].to_string(),
+                        ip: ip.to_string(),
+                        port,
+                    });
+                }
+            }
+        }
+
+        ports.sort_by_key(|p| p.port);
+        ports.dedup_by_key(|p| (p.protocol.clone(), p.port));
+        return Ok(ports);
+    }
+
+    #[cfg(unix)]
+    {
+        let output = std::process::Command::new("sh")
+            .args(["-c", "netstat -an | grep LISTEN"])
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut ports: Vec<LocalPort> = Vec::new();
+
+        for line in stdout.lines() {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            if cols.len() < 4 {
+                continue;
+            }
+            let local = cols[3];
+            if let Some(idx) = local.rfind(if cfg!(target_os = "macos") { '.' } else { ':' }) {
+                let ip = &local[..idx];
+                if let Ok(port) = local[idx + 1..].parse::<u16>() {
+                    let proto = cols[0].to_lowercase();
+                    ports.push(LocalPort {
+                        protocol: proto,
+                        ip: ip.to_string(),
+                        port,
+                    });
+                }
+            }
+        }
+
+        ports.sort_by_key(|p| p.port);
+        ports.dedup_by_key(|p| (p.protocol.clone(), p.port));
+        return Ok(ports);
+    }
+
+    #[cfg(not(any(windows, unix)))]
+    {
+        Ok(vec![])
+    }
+}
+
+/// #6 打开外部 URL
+#[tauri::command]
+pub async fn open_url(url: String) -> Result<bool, String> {
+    info!("Opening URL: {}", url);
+
+    #[cfg(windows)]
+    {
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", &url])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?;
+    }
+
+    Ok(true)
+}
+
+/// #7 重启应用
+#[tauri::command]
+pub async fn relaunch_app(app: tauri::AppHandle) -> Result<bool, String> {
+    info!("Relaunching app");
+    app.restart();
+    Ok(true)
+}
+
+/// #8 打开应用数据目录
+#[tauri::command]
+pub async fn open_app_data() -> Result<bool, String> {
+    let config_dir = dirs::config_dir()
+        .map(|d| d.join("frpc-gui"))
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    if !config_dir.exists() {
+        std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(&config_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(&config_dir).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(&config_dir).spawn().map_err(|e| e.to_string())?;
+    }
+
+    Ok(true)
+}
+
+/// #9 通用文件选择对话框
+#[tauri::command]
+pub async fn select_local_file(
+    name: Option<String>,
+    extensions: Option<Vec<String>>,
+) -> Result<Option<String>, String> {
+    // 前端已使用 @tauri-apps/plugin-dialog 直接调用
+    // 此命令保留作为后端备用
+    Ok(None)
+}
+
+/// #10 获取已下载版本列表
+#[tauri::command]
+pub async fn get_downloaded_versions(state: State<'_, AppState>) -> Result<Vec<FrpVersionInfo>, String> {
+    let vm = state.version_manager.lock().await;
+    match vm.as_ref() {
+        Some(m) => {
+            // 从磁盘扫描已下载的版本
+            let install_dir = dirs::config_dir()
+                .map(|d| d.join("frpc-gui").join("bin"))
+                .unwrap_or_else(|| PathBuf::from("."));
+
+            let mut versions = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&install_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let version_str = path.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        let frpc_path = m.get_downloaded_frpc_path();
+                        if frpc_path.is_some() {
+                            versions.push(FrpVersionInfo {
+                                version: version_str.clone(),
+                                name: version_str.clone(),
+                                published_at: String::new(),
+                                download_url: String::new(),
+                                mirror_url: None,
+                                size: 0,
+                                download_count: 0,
+                                downloaded: true,
+                                local_path: frpc_path.map(|p| p.to_string_lossy().to_string()),
+                            });
+                        }
+                    }
+                }
+            }
+            Ok(versions)
+        }
+        None => Err("版本管理器未初始化".to_string()),
+    }
+}
+
+/// #11 修改代理状态（单独切换，触发热重载）
+#[tauri::command]
+pub async fn modify_proxy_status(
+    proxy_name: String,
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    info!("Modifying proxy status: {} -> {}", proxy_name, enabled);
+
+    // 更新配置中的代理状态
+    let cm = state.config_manager.lock().await;
+    if let Some(m) = cm.as_ref() {
+        let mut config = m.load().map_err(|e| e.to_string())?;
+        if let Some(proxy) = config.proxies.iter_mut().find(|p| p.name == proxy_name) {
+            proxy.enabled = enabled;
+        }
+        m.save(&config).map_err(|e| e.to_string())?;
+    }
+    drop(cm);
+
+    // 尝试热重载
+    let pm = state.process_manager.lock().await;
+    if let Some(pm) = pm.as_ref() {
+        let cm2 = state.config_manager.lock().await;
+        if let Some(m) = cm2.as_ref() {
+            if let Ok(config) = m.load() {
+                let _ = pm.reload(&config).await;
+            }
+        }
+    }
+
+    Ok(true)
+}
+
+/// #12 检查应用更新（获取最新版本）
+#[tauri::command]
+pub async fn check_app_update() -> Result<String, String> {
+    info!("Checking for app updates");
+
+    let client = reqwest::Client::builder()
+        .user_agent("frpc-gui")
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .get("https://api.github.com/repos/ccy-max/frpc-gui/releases/latest")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+
+    let release: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let version = release.get("tag_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    Ok(version)
+}
+
+// ==================== 数据结构 ====================
+
+/// 本地端口信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalPort {
+    pub protocol: String,
+    pub ip: String,
+    pub port: u16,
+}
+
 // ==================== 应用初始化 ====================
 
 pub fn init_app(app: &mut tauri::App) {

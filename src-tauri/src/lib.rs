@@ -72,6 +72,7 @@ pub fn run() {
             commands::export_config,
             commands::import_config,
             commands::import_toml_config,
+            commands::reset_all_config,
             // 进程控制
             commands::start_frp,
             commands::stop_frp,
@@ -79,17 +80,28 @@ pub fn run() {
             commands::reload_frp,
             commands::get_process_status,
             commands::detect_frpc_process,
+            commands::modify_proxy_status,
             // 日志
             commands::get_logs,
+            commands::get_frpc_log_content,
+            commands::get_app_log_content,
+            commands::open_frpc_log_file,
             // FRP 版本管理
             commands::list_frp_versions,
             commands::download_frp_version,
             commands::delete_frp_version,
             commands::get_mirrors,
             commands::import_local_frpc,
+            commands::get_downloaded_versions,
             // 系统
             commands::check_frpc_exists,
             commands::get_frpc_version,
+            commands::open_url,
+            commands::relaunch_app,
+            commands::open_app_data,
+            commands::select_local_file,
+            commands::check_app_update,
+            commands::get_local_ports,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
