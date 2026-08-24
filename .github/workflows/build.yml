@@ -48,9 +48,8 @@ jobs:
       - name: List build artifacts (Debug)
         run: |
           echo "=== Build output ==="
-          ls -la src-tauri/target/release/ | Select-String "frpc|FRPC"
-          echo "=== Bundle output ==="
-          ls -la src-tauri/target/release/bundle/ -Recurse | Select-String "exe|msi" | Select-Object -First 20
+          Get-ChildItem src-tauri/target/release/ -Filter "*frpc*" | Select-Object Name, Length
+          Get-ChildItem src-tauri/target/release/ -Filter "*.dll" | Select-Object Name, Length | Select-Object -First 5
         shell: pwsh
         working-directory: .
 
