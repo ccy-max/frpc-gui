@@ -12,6 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::io::{BufRead, BufReader, Read};
 use tokio::sync::mpsc;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 /// 连接错误/成功匹配模式
 const FRPC_ERROR_PATTERNS: &[&str] = &[
     "connect to server error",
