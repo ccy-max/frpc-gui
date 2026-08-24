@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Star } from '@element-plus/icons-vue';
+import { StarOutlined } from '@ant-design/icons-vue';
 
 const packageInfo = {
   version: '0.1.0',
@@ -15,33 +15,30 @@ function openUrl(url: string) {
 
 <template>
   <div class="about-page">
-    <el-card class="about-card">
+    <a-card class="about-card">
       <div class="logo-section">
-        <el-icon :size="64" color="var(--el-color-primary)"><Monitor /></el-icon>
         <h1 class="app-name">FRPC GUI</h1>
         <p class="description">FRP 内网穿透桌面管理应用</p>
       </div>
-
-      <el-descriptions :column="1" border>
-        <el-descriptions-item label="版本">
-          <el-tag>{{ packageInfo.version }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="作者">
-          {{ packageInfo.author }}
-        </el-descriptions-item>
-        <el-descriptions-item label="许可证">
-          {{ packageInfo.license }}
-        </el-descriptions-item>
-      </el-descriptions>
-
+      <a-descriptions :column="1" bordered>
+        <a-descriptions-item label="版本">
+          <a-tag color="blue">{{ packageInfo.version }}</a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="作者">{{ packageInfo.author }}</a-descriptions-item>
+        <a-descriptions-item label="许可证">{{ packageInfo.license }}</a-descriptions-item>
+      </a-descriptions>
       <div class="links">
-        <el-button type="primary" :icon="Star" @click="openUrl(packageInfo.github)">
-          GitHub 仓库
-        </el-button>
+        <a-button type="primary" :icon="h(StarOutlined)" @click="openUrl(packageInfo.github)">GitHub 仓库</a-button>
       </div>
-    </el-card>
+    </a-card>
   </div>
 </template>
+
+<script lang="ts">
+import { h } from 'vue';
+import { StarOutlined } from '@ant-design/icons-vue';
+export default { methods: { h } };
+</script>
 
 <style scoped lang="scss">
 .about-page {
@@ -51,30 +48,9 @@ function openUrl(url: string) {
   align-items: center;
   height: calc(100vh - 60px);
 }
-
-.about-card {
-  max-width: 500px;
-  width: 100%;
-}
-
-.logo-section {
-  text-align: center;
-  padding: 24px 0;
-}
-
-.app-name {
-  font-size: 28px;
-  font-weight: 700;
-  margin: 16px 0 8px;
-}
-
-.description {
-  color: var(--el-text-color-secondary);
-  font-size: 14px;
-}
-
-.links {
-  margin-top: 24px;
-  text-align: center;
-}
+.about-card { max-width: 500px; width: 100%; }
+.logo-section { text-align: center; padding: 24px 0; }
+.app-name { font-size: 28px; font-weight: 700; margin: 0 0 8px; }
+.description { color: #8c8c8c; font-size: 14px; }
+.links { margin-top: 24px; text-align: center; }
 </style>

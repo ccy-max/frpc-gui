@@ -2,6 +2,15 @@
 import { ref } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter } from 'vue-router';
+import {
+  DashboardOutlined,
+  CloudServerOutlined,
+  ApiOutlined,
+  DownloadOutlined,
+  FileTextOutlined,
+  SettingOutlined,
+  InfoCircleOutlined,
+} from '@ant-design/icons-vue';
 
 const appStore = useAppStore();
 const router = useRouter();
@@ -9,13 +18,13 @@ const router = useRouter();
 const activeMenu = ref('dashboard');
 
 const menuItems = [
-  { key: 'dashboard', icon: 'DataBoard', label: '概览' },
-  { key: 'servers', icon: 'Server', label: '服务器管理' },
-  { key: 'proxies', icon: 'Connection', label: '代理管理' },
-  { key: 'versions', icon: 'Download', label: '版本管理' },
-  { key: 'logs', icon: 'Document', label: '日志查看' },
-  { key: 'settings', icon: 'Setting', label: '设置' },
-  { key: 'about', icon: 'InfoFilled', label: '关于' },
+  { key: 'dashboard', icon: DashboardOutlined, label: '概览' },
+  { key: 'servers', icon: CloudServerOutlined, label: '服务器管理' },
+  { key: 'proxies', icon: ApiOutlined, label: '代理管理' },
+  { key: 'versions', icon: DownloadOutlined, label: '版本管理' },
+  { key: 'logs', icon: FileTextOutlined, label: '日志查看' },
+  { key: 'settings', icon: SettingOutlined, label: '设置' },
+  { key: 'about', icon: InfoCircleOutlined, label: '关于' },
 ];
 
 const handleMenuSelect = (key: string) => {
@@ -25,47 +34,44 @@ const handleMenuSelect = (key: string) => {
 </script>
 
 <template>
-  <el-container class="app-container">
+  <a-layout class="app-container">
     <!-- 侧边栏 -->
-    <el-aside width="220px" class="app-aside">
+    <a-layout-sider width="220" class="app-sider" :trigger="null">
       <div class="logo">
-        <el-icon :size="28" color="var(--el-color-primary)"><Monitor /></el-icon>
         <span class="logo-text">FRPC GUI</span>
       </div>
-      
-      <el-menu
-        :default-active="activeMenu"
+
+      <a-menu
+        :selected-keys="[activeMenu]"
+        mode="inline"
+        theme="dark"
         class="app-menu"
-        @select="handleMenuSelect"
+        @click="handleMenuSelect"
       >
-        <el-menu-item
-          v-for="item in menuItems"
-          :key="item.key"
-          :index="item.key"
-        >
-          <el-icon><component :is="item.icon" /></el-icon>
+        <a-menu-item v-for="item in menuItems" :key="item.key">
+          <component :is="item.icon" />
           <span>{{ item.label }}</span>
-        </el-menu-item>
-      </el-menu>
-      
+        </a-menu-item>
+      </a-menu>
+
       <!-- 底部状态 -->
-      <div class="aside-footer">
-        <el-tag :type="appStore.isRunning ? 'success' : 'info'" size="small">
-          <span class="status-dot" :class="appStore.isRunning ? 'running' : 'stopped'"></span>
-          {{ appStore.isRunning ? '运行中' : '已停止' }}
-        </el-tag>
+      <div class="sider-footer">
+        <a-badge
+          :status="appStore.isRunning ? 'success' : 'default'"
+          :text="appStore.isRunning ? '运行中' : '已停止'"
+        />
       </div>
-    </el-aside>
+    </a-layout-sider>
 
     <!-- 主内容区 -->
-    <el-main class="app-main">
+    <a-layout-content class="app-content">
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
           <component :is="Component" />
         </transition>
       </router-view>
-    </el-main>
-  </el-container>
+    </a-layout-content>
+  </a-layout>
 </template>
 
 <style scoped lang="scss">
@@ -74,57 +80,36 @@ const handleMenuSelect = (key: string) => {
   width: 100%;
 }
 
-.app-aside {
-  background: var(--app-sidebar-bg);
-  border-right: 1px solid var(--app-border-color);
+.app-sider {
   display: flex;
   flex-direction: column;
-  
+
   .logo {
     height: 60px;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    
+
     .logo-text {
       font-size: 18px;
       font-weight: 600;
-      color: var(--app-sidebar-text);
+      color: #ffffff;
     }
   }
-  
+
   .app-menu {
     flex: 1;
     border-right: none;
-    background: transparent;
     padding-top: 8px;
-    
-    :deep(.el-menu-item) {
-      height: 48px;
-      margin: 4px 8px;
-      border-radius: 8px;
-      color: var(--app-sidebar-text);
-      
-      &:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-      }
-      
-      &.is-active {
-        background-color: var(--el-color-primary);
-        color: #ffffff;
-      }
-    }
   }
-  
-  .aside-footer {
-    padding: 16px;
+
+  .sider-footer {
+    padding: 16px 24px;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
 }
 
-.app-main {
+.app-content {
   padding: 0;
   overflow: hidden;
   background: var(--app-bg-color);

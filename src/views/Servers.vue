@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useAppStore } from '@/stores/app';
-import { useI18n } from 'vue-i18n';
-import { Plus } from '@element-plus/icons-vue';
+import { PlusOutlined } from '@ant-design/icons-vue';
+import { message, Modal } from 'ant-design-vue';
 
 const appStore = useAppStore();
-const { t } = useI18n();
 
-const dialogVisible = ref(false);
+const modalVisible = ref(false);
 const editingId = ref<string | null>(null);
-
-const form = ref({
+const form = ref<any>({
   id: '',
   name: '',
   serverAddr: '',
@@ -20,43 +18,52 @@ const form = ref({
   enabled: true,
 });
 
-function openAddDialog() {
+const columns = [
+  { title: '名称', dataIndex: 'name', key: 'name' },
+  { title: '服务器地址', dataIndex: 'serverAddr', key: 'serverAddr' },
+  { title: '端口', dataIndex: 'serverPort', key: 'serverPort', width: 80 },
+  { title: 'TLS', key: 'tlsEnable', width: 60 },
+  { title: '启用', key: 'enabled', width: 80 },
+  { title: '操作', key: 'action', width: 180, fixed: 'right' as const },
+];
+
+function openAdd() {
   editingId.value = null;
-  form.value = {
-    id: '',
-    name: '',
-    serverAddr: '',
-    serverPort: 7000,
-    token: '',
-    tlsEnable: false,
-    enabled: true,
-  };
-  dialogVisible.value = true;
+  form.value = { id: '', name: '', serverAddr: '', serverPort: 7000, token: '', tlsEnable: false, enabled: true };
+  modalVisible.value = true;
 }
 
-function openEditDialog(server: any) {
+function openEdit(server: any) {
   editingId.value = server.id;
   form.value = { ...server };
-  dialogVisible.value = true;
+  modalVisible.value = true;
 }
 
 function handleSave() {
   if (!form.value.name || !form.value.serverAddr) {
+    message.warning('请填写必填项');
     return;
   }
-  
   if (editingId.value) {
     appStore.updateServer(editingId.value, form.value);
+    message.success('保存成功');
   } else {
     form.value.id = Date.now().toString();
     appStore.addServer(form.value);
+    message.success('保存成功');
   }
-  
-  dialogVisible.value = false;
+  modalVisible.value = false;
 }
 
 function handleDelete(server: any) {
-  appStore.deleteServer(server.id);
+  Modal.confirm({
+    title: '确认删除',
+    content: `确定要删除服务器 "${server.name}" 吗？`,
+    onOk: () => {
+      appStore.deleteServer(server.id);
+      message.success('删除成功');
+    },
+  });
 }
 
 const servers = computed(() => appStore.servers);
@@ -66,80 +73,57 @@ const servers = computed(() => appStore.servers);
   <div class="servers-page">
     <div class="page-header">
       <h2 class="page-title">服务器管理</h2>
-      <el-button type="primary" :icon="Plus" @click="openAddDialog">
-        添加服务器
-      </el-button>
+      <a-button type="primary" :icon="h(PlusOutlined)" @click="openAdd">添加服务器</a-button>
     </div>
 
-    <el-table :data="servers" style="width: 100%">
-      <el-table-column prop="name" label="名称" min-width="150" />
-      <el-table-column prop="serverAddr" label="服务器地址" min-width="200" />
-      <el-table-column prop="serverPort" label="端口" width="100" />
-      <el-table-column prop="tlsEnable" label="TLS" width="80">
-        <template #default="{ row }">
-          <el-tag :type="row.tlsEnable ? 'success' : 'info'" size="small">
-            {{ row.tlsEnable ? '✓' : '✗' }}
-          </el-tag>
+    <a-table :data-source="servers" :columns="columns" row-key="id" :pagination="false">
+      <template #bodyCell="{ column, record }">
+        <template v-if="column.key === 'tlsEnable'">
+          <a-tag :color="record.tlsEnable ? 'green' : 'default'">{{ record.tlsEnable ? '✓' : '✗' }}</a-tag>
         </template>
-      </el-table-column>
-      <el-table-column prop="enabled" label="启用" width="100">
-        <template #default="{ row }">
-          <el-switch v-model="row.enabled" size="small" />
+        <template v-if="column.key === 'enabled'">
+          <a-switch v-model:checked="record.enabled" size="small" />
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" type="primary" @click="openEditDialog(row)">
-            编辑
-          </el-button>
-          <el-button size="small" type="danger" @click="handleDelete(row)">
-            删除
-          </el-button>
+        <template v-if="column.key === 'action'">
+          <a-button size="small" type="primary" @click="openEdit(record)">编辑</a-button>
+          <a-button size="small" danger @click="handleDelete(record)" style="margin-left: 8px">删除</a-button>
         </template>
-      </el-table-column>
-    </el-table>
+      </template>
+    </a-table>
 
-    <el-empty v-if="servers.length === 0" description="暂无服务器配置" />
+    <a-empty v-if="servers.length === 0" description="暂无服务器配置" style="margin-top: 48px" />
 
     <!-- 编辑/添加对话框 -->
-    <el-dialog
-      v-model="dialogVisible"
-      :title="editingId ? '编辑服务器' : '添加服务器'"
-      width="500px"
-    >
-      <el-form :model="form" label-width="100px">
-        <el-form-item label="名称" required>
-          <el-input v-model="form.name" placeholder="请输入服务器名称" />
-        </el-form-item>
-        
-        <el-form-item label="服务器地址" required>
-          <el-input v-model="form.serverAddr" placeholder="例如：127.0.0.1" />
-        </el-form-item>
-        
-        <el-form-item label="端口" required>
-          <el-input-number v-model="form.serverPort" :min="1" :max="65535" style="width: 100%" />
-        </el-form-item>
-
-        <el-form-item label="令牌">
-          <el-input v-model="form.token" type="password" show-password />
-        </el-form-item>
-
-        <el-form-item label="启用 TLS">
-          <el-switch v-model="form.tlsEnable" />
-        </el-form-item>
-
-        <el-form-item label="启用">
-          <el-switch v-model="form.enabled" />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSave">保存</el-button>
-      </template>
-    </el-dialog>
+    <a-modal v-model:open="modalVisible" :title="editingId ? '编辑服务器' : '添加服务器'" @ok="handleSave">
+      <a-form :model="form" layout="vertical">
+        <a-form-item label="名称" required>
+          <a-input v-model:value="form.name" placeholder="请输入服务器名称" />
+        </a-form-item>
+        <a-form-item label="服务器地址" required>
+          <a-input v-model:value="form.serverAddr" placeholder="例如：127.0.0.1" />
+        </a-form-item>
+        <a-form-item label="端口" required>
+          <a-input-number v-model:value="form.serverPort" :min="1" :max="65535" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="令牌">
+          <a-input-password v-model:value="form.token" placeholder="请输入令牌" />
+        </a-form-item>
+        <a-form-item label="启用 TLS">
+          <a-switch v-model:checked="form.tlsEnable" />
+        </a-form-item>
+        <a-form-item label="启用">
+          <a-switch v-model:checked="form.enabled" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
+
+<script lang="ts">
+import { h } from 'vue';
+import { PlusOutlined } from '@ant-design/icons-vue';
+export default { methods: { h } };
+</script>
 
 <style scoped lang="scss">
 .servers-page {
@@ -158,6 +142,5 @@ const servers = computed(() => appStore.servers);
 .page-title {
   font-size: 24px;
   font-weight: 600;
-  color: var(--el-text-color-primary);
 }
 </style>

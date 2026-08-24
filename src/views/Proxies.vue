@@ -1,18 +1,14 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useAppStore } from '@/stores/app';
-import { Plus } from '@element-plus/icons-vue';
+import { PlusOutlined } from '@ant-design/icons-vue';
+import { message, Modal } from 'ant-design-vue';
 
 const appStore = useAppStore();
 
-const dialogVisible = ref(false);
-const form = ref({
-  name: '',
-  type: 'tcp',
-  local_ip: '127.0.0.1',
-  local_port: 8080,
-  remote_port: 8080,
-  enabled: true,
+const modalVisible = ref(false);
+const form = ref<any>({
+  name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 8080, remote_port: 8080, enabled: true,
 });
 
 const proxyTypes = [
@@ -24,32 +20,41 @@ const proxyTypes = [
   { value: 'xtcp', label: 'XTCP' },
 ];
 
-function openAddDialog() {
-  form.value = {
-    name: '',
-    type: 'tcp',
-    local_ip: '127.0.0.1',
-    local_port: 8080,
-    remote_port: 8080,
-    enabled: true,
-  };
-  dialogVisible.value = true;
+const columns = [
+  { title: '名称', dataIndex: 'name', key: 'name' },
+  { title: '类型', dataIndex: 'type', key: 'type', width: 100 },
+  { title: '本地地址', key: 'local', customRender: ({ record }: { record: any }) => `${record.local_ip}:${record.local_port}` },
+  { title: '远程端口', dataIndex: 'remote_port', key: 'remote_port', width: 100 },
+  { title: '状态', key: 'enabled', width: 100 },
+  { title: '操作', key: 'action', width: 180, fixed: 'right' as const },
+];
+
+function openAdd() {
+  form.value = { name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 8080, remote_port: 8080, enabled: true };
+  modalVisible.value = true;
 }
 
 function handleSave() {
   if (!form.value.name) {
+    message.warning('请输入代理名称');
     return;
   }
   appStore.addProxy(form.value);
-  dialogVisible.value = false;
+  message.success('保存成功');
+  modalVisible.value = false;
 }
 
 function handleDelete(proxy: any) {
-  appStore.deleteProxy(proxy.name);
+  Modal.confirm({
+    title: '确认删除',
+    content: `确定要删除代理 "${proxy.name}" 吗？`,
+    onOk: () => { appStore.deleteProxy(proxy.name); message.success('删除成功'); },
+  });
 }
 
 function toggleProxy(proxy: any) {
   appStore.updateProxy(proxy.name, { enabled: !proxy.enabled });
+  message.info(proxy.enabled ? '已停止' : '已启动');
 }
 
 const proxies = computed(() => appStore.proxies);
@@ -59,105 +64,69 @@ const proxies = computed(() => appStore.proxies);
   <div class="proxies-page">
     <div class="page-header">
       <h2 class="page-title">代理管理</h2>
-      <el-button type="primary" :icon="Plus" @click="openAddDialog">
-        添加代理
-      </el-button>
+      <a-button type="primary" :icon="h(PlusOutlined)" @click="openAdd">添加代理</a-button>
     </div>
 
-    <el-table :data="proxies" style="width: 100%">
-      <el-table-column prop="name" label="名称" min-width="120" />
-      <el-table-column prop="type" label="类型" width="100">
-        <template #default="{ row }">
-          <el-tag size="small" type="info">{{ row.type.toUpperCase() }}</el-tag>
+    <a-table :data-source="proxies" :columns="columns" row-key="name" :pagination="false">
+      <template #bodyCell="{ column, record }">
+        <template v-if="column.key === 'type'">
+          <a-tag color="blue">{{ record.type.toUpperCase() }}</a-tag>
         </template>
-      </el-table-column>
-      <el-table-column label="本地地址" min-width="150">
-        <template #default="{ row }">
-          {{ row.local_ip }}:{{ row.local_port }}
+        <template v-if="column.key === 'enabled'">
+          <a-tag :color="record.enabled ? 'green' : 'default'">{{ record.enabled ? '运行中' : '已停止' }}</a-tag>
         </template>
-      </el-table-column>
-      <el-table-column prop="remote_port" label="远程端口" width="100" />
-      <el-table-column prop="enabled" label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
-            {{ row.enabled ? '运行中' : '已停止' }}
-          </el-tag>
+        <template v-if="column.key === 'action'">
+          <a-button size="small" :type="record.enabled ? 'default' : 'primary'" @click="toggleProxy(record)">
+            {{ record.enabled ? '停止' : '启动' }}
+          </a-button>
+          <a-button size="small" danger @click="handleDelete(record)" style="margin-left: 8px">删除</a-button>
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" :type="row.enabled ? 'warning' : 'success'" @click="toggleProxy(row)">
-            {{ row.enabled ? '停止' : '启动' }}
-          </el-button>
-          <el-button size="small" type="danger" @click="handleDelete(row)">
-            删除
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <el-empty v-if="proxies.length === 0" description="暂无代理配置" />
-
-    <!-- 添加代理对话框 -->
-    <el-dialog v-model="dialogVisible" title="添加代理" width="500px">
-      <el-form :model="form" label-width="100px">
-        <el-form-item label="名称" required>
-          <el-input v-model="form.name" placeholder="请输入代理名称" />
-        </el-form-item>
-        
-        <el-form-item label="类型" required>
-          <el-select v-model="form.type" style="width: 100%">
-            <el-option v-for="item in proxyTypes" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-        </el-form-item>
-
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="本地 IP">
-              <el-input v-model="form.local_ip" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="本地端口">
-              <el-input-number v-model="form.local_port" :min="1" :max="65535" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-form-item label="远程端口">
-          <el-input-number v-model="form.remote_port" :min="1" :max="65535" style="width: 100%" />
-        </el-form-item>
-
-        <el-form-item label="启用">
-          <el-switch v-model="form.enabled" />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSave">保存</el-button>
       </template>
-    </el-dialog>
+    </a-table>
+
+    <a-empty v-if="proxies.length === 0" description="暂无代理配置" style="margin-top: 48px" />
+
+    <a-modal v-model:open="modalVisible" title="添加代理" @ok="handleSave">
+      <a-form :model="form" layout="vertical">
+        <a-form-item label="名称" required>
+          <a-input v-model:value="form.name" placeholder="请输入代理名称" />
+        </a-form-item>
+        <a-form-item label="类型" required>
+          <a-select v-model:value="form.type">
+            <a-select-option v-for="t in proxyTypes" :key="t.value" :value="t.value">{{ t.label }}</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="本地 IP">
+              <a-input v-model:value="form.local_ip" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="本地端口">
+              <a-input-number v-model:value="form.local_port" :min="1" :max="65535" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="远程端口">
+          <a-input-number v-model:value="form.remote_port" :min="1" :max="65535" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="启用">
+          <a-switch v-model:checked="form.enabled" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
+<script lang="ts">
+import { h } from 'vue';
+import { PlusOutlined } from '@ant-design/icons-vue';
+export default { methods: { h } };
+</script>
+
 <style scoped lang="scss">
-.proxies-page {
-  padding: 24px;
-  height: calc(100vh - 60px);
-  overflow-y: auto;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
+.proxies-page { padding: 24px; height: calc(100vh - 60px); overflow-y: auto; }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.page-title { font-size: 24px; font-weight: 600; }
 </style>
