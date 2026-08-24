@@ -9,7 +9,7 @@ FRP 内网穿透桌面管理应用 - 基于 Tauri v2 + Vue 3 开发
 
 ## 📖 项目简介
 
-FRPC GUI 是一款跨平台的 FRP 内网穿透桌面管理工具，完全对标 [frpc-desktop](https://github.com/luckjiawei/frpc-desktop)，采用 Rust + Tauri v2 + Vue 3 技术栈开发。
+FRPC GUI 是一款跨平台的 FRP 内网穿透桌面管理工具，采用 Rust + Tauri v2 + Vue 3 技术栈开发。
 
 相比 Electron 方案，本应用具有：
 - 🚀 **更小的体积** - 打包后仅 10-20MB（Electron 约 150MB+）
