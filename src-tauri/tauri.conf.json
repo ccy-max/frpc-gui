@@ -22,8 +22,7 @@
         "fullscreen": false,
         "center": true,
         "decorations": true,
-        "transparent": false,
-        "titleBarStyle": "Visible"
+        "transparent": false
       }
     ],
     "security": {
@@ -46,31 +45,6 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "FRP 内网穿透桌面管理工具",
-    "longDescription": "基于 Tauri v2 + Vue 3 开发的跨平台 FRP 客户端管理工具，支持可视化配置、进程管理、日志查看等功能"
-  },
-  "plugins": {
-    "shell": {
-      "all": true,
-      "scope": [
-        {
-          "name": "frpc",
-          "cmd": "frpc",
-          "args": true
-        }
-      ]
-    },
-    "fs": {
-      "all": true,
-      "scope": ["**"]
-    },
-    "dialog": {
-      "all": true
-    },
-    "notification": {
-      "all": true
-    },
-    "autostart": {
-      "all": true
-    }
+    "longDescription": "跨平台 FRP 客户端管理工具"
   }
 }
