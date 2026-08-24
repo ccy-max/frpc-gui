@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { ReloadOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons-vue';
+import { message } from 'ant-design-vue';
 
 const appStore = useAppStore();
 

@@ -424,12 +424,15 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function loadLocalPorts() {
+  async function loadLocalPorts(): Promise<LocalPort[]> {
     try {
-      localPorts.value = await invoke<any[]>('get_local_ports');
+      const ports = await invoke<any[]>('get_local_ports');
+      localPorts.value = ports;
+      return ports;
     } catch (e) {
       console.error('Failed to load local ports:', e);
       localPorts.value = [];
+      return [];
     }
   }
 

@@ -170,7 +170,7 @@ const portSelectorTarget = ref<'local' | 'remote'>('local');
 async function openPortSelector(target: 'local' | 'remote') {
   portSelectorTarget.value = target;
   const ports = await appStore.loadLocalPorts();
-  portList.value = ports;
+  portList.value = ports || [];
   portSelectorVisible.value = true;
 }
 

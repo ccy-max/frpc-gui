@@ -98,6 +98,25 @@ const base64DialogVisible = ref(false);
 const base64Mode = ref<'export' | 'import'>('export');
 const base64Text = ref('');
 
+// 安全的 Base64 编码/解码（支持 Unicode）
+function safeEncodeBase64(str: string): string {
+  try {
+    return btoa(unescape(encodeURIComponent(str)));
+  } catch (e) {
+    console.error('Base64 encode failed:', e);
+    return '';
+  }
+}
+
+function safeDecodeBase64(base64: string): string {
+  try {
+    return decodeURIComponent(escape(atob(base64)));
+  } catch (e) {
+    console.error('Base64 decode failed:', e);
+    throw new Error('Invalid Base64');
+  }
+}
+
 async function handleExportBase64() {
   base64Mode.value = 'export';
   const config = appStore.frpConfig;
@@ -106,8 +125,7 @@ async function handleExportBase64() {
     return;
   }
   const json = JSON.stringify(config, null, 2);
-  const base64 = btoa(unescape(encodeURIComponent(json)));
-  base64Text.value = base64;
+  base64Text.value = safeEncodeBase64(json);
   base64DialogVisible.value = true;
 }
 
@@ -130,7 +148,7 @@ async function handlePasteBase64() {
   try {
     const text = await readText();
     if (text) {
-      base64Text.value = text.replace('frp://', '');
+      base64Text.value = text.replace('frp://', '').trim();
     }
   } catch (e) {
     message.error('读取剪贴板失败');
@@ -138,15 +156,27 @@ async function handlePasteBase64() {
 }
 
 async function handleParseBase64() {
+  if (!base64Text.value.trim()) {
+    message.warning('请输入 Base64 配置');
+    return;
+  }
+  
   try {
-    const json = decodeURIComponent(escape(atob(base64Text.value)));
+    const json = safeDecodeBase64(base64Text.value.trim());
     const config = JSON.parse(json);
+    
+    // 基本验证
+    if (!config.server_addr || !config.proxies) {
+      message.error('无效的配置格式：缺少必要字段');
+      return;
+    }
+    
     appStore.frpConfig = config;
     await appStore.saveConfig(config);
     message.success('配置导入成功');
     base64DialogVisible.value = false;
-  } catch (e) {
-    message.error('解析失败：配置格式不正确');
+  } catch (e: any) {
+    message.error(`解析失败：${e.message || '配置格式不正确'}`);
   }
 }
 

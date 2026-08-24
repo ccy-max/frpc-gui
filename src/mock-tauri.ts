@@ -1,6 +1,15 @@
 // Tauri API Mock - 用于浏览器预览
 // 在浏览器中运行时拦截所有 invoke 调用
 
+declare global {
+  interface Window {
+    __TAURI_MOCK__?: {
+      invoke: (cmd: string, args?: any) => Promise<any>;
+    };
+    invoke?: (cmd: string, args?: any) => Promise<any>;
+  }
+}
+
 const isBrowser = typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window);
 
 if (isBrowser) {
