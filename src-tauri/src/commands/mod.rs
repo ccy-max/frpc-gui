@@ -23,6 +23,16 @@ impl AppState {
             log_tx: Mutex::new(Some(log_tx)),
         }
     }
+
+    /// 带配置管理器初始化（同步安全）
+    pub fn with_config(config_manager: ConfigManager) -> Self {
+        let (log_tx, _) = mpsc::channel(100);
+        Self {
+            config_manager: Mutex::new(Some(config_manager)),
+            process_manager: Mutex::new(None),
+            log_tx: Mutex::new(Some(log_tx)),
+        }
+    }
 }
 
 /// 配置相关命令
@@ -251,12 +261,8 @@ pub fn get_frpc_version(path: String) -> Result<String, String> {
     crate::frp::get_frpc_version(&PathBuf::from(&path)).map_err(|e| e.to_string())
 }
 
-/// 应用初始化
+/// 应用初始化（同步安全，不依赖 tokio 运行时）
 pub fn init_app(app: &mut tauri::App) {
-    // 初始化应用状态
-    let app_state = AppState::new();
-    app.manage(app_state);
-    
     // 设置配置管理器路径
     let config_path = app
         .path()
@@ -266,12 +272,9 @@ pub fn init_app(app: &mut tauri::App) {
     
     let config_manager = ConfigManager::new(config_path);
     
-    // 更新状态
-    let state = app.state::<AppState>();
-    let rt = tokio::runtime::Handle::current();
-    rt.block_on(async {
-        *state.config_manager.lock().await = Some(config_manager);
-    });
+    // 使用 with_config 初始化状态，无需异步操作
+    let app_state = AppState::with_config(config_manager);
+    app.manage(app_state);
     
     info!("Application initialized");
 }
