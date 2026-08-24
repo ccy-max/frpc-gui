@@ -6,15 +6,25 @@ import { message, Modal } from 'ant-design-vue';
 
 const appStore = useAppStore();
 
+const searchKeyword = ref('');
 const modalVisible = ref(false);
 const editingId = ref<string | null>(null);
 const form = ref<any>({
   id: '', name: '', serverAddr: '', serverPort: 7000, token: '', tlsEnable: false, enabled: true,
 });
 
+const filteredServers = computed(() => {
+  if (!searchKeyword.value.trim()) return appStore.servers;
+  const kw = searchKeyword.value.toLowerCase();
+  return appStore.servers.filter(s => 
+    s.name.toLowerCase().includes(kw) || 
+    s.serverAddr.toLowerCase().includes(kw)
+  );
+});
+
 const columns = [
-  { title: '名称', dataIndex: 'name', key: 'name' },
-  { title: '服务器地址', dataIndex: 'serverAddr', key: 'serverAddr' },
+  { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true },
+  { title: '服务器地址', dataIndex: 'serverAddr', key: 'serverAddr', ellipsis: true },
   { title: '端口', dataIndex: 'serverPort', key: 'serverPort', width: 80 },
   { title: 'TLS', key: 'tlsEnable', width: 60 },
   { title: '启用', key: 'enabled', width: 80 },
@@ -44,7 +54,7 @@ function handleSave() {
   } else {
     form.value.id = Date.now().toString();
     appStore.addServer(form.value);
-    message.success('保存成功');
+    message.success('添加成功');
   }
   modalVisible.value = false;
 }
@@ -59,38 +69,68 @@ function handleDelete(server: any) {
     },
   });
 }
-
-const servers = computed(() => appStore.servers);
 </script>
 
 <template>
-  <div class="servers-page">
-    <div class="page-header">
-      <h2 class="page-title">服务器管理</h2>
-      <a-button type="primary" @click="openAdd">
-        <template #icon><PlusOutlined /></template>
-        添加服务器
-      </a-button>
-    </div>
-
-    <a-table :data-source="servers" :columns="columns" row-key="id" :pagination="false">
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'tlsEnable'">
-          <a-tag :color="record.tlsEnable ? 'green' : 'default'">{{ record.tlsEnable ? '✓' : '✗' }}</a-tag>
-        </template>
-        <template v-if="column.key === 'enabled'">
-          <a-switch v-model:checked="record.enabled" size="small" />
-        </template>
-        <template v-if="column.key === 'action'">
-          <a-button size="small" type="primary" @click="openEdit(record)">编辑</a-button>
-          <a-button size="small" danger @click="handleDelete(record)" style="margin-left: 8px">删除</a-button>
-        </template>
+  <div class="page-container">
+    <a-page-header title="服务器管理">
+      <template #extra>
+        <a-button type="primary" @click="openAdd">
+          <template #icon><PlusOutlined /></template>
+          添加服务器
+        </a-button>
       </template>
-    </a-table>
+    </a-page-header>
 
-    <a-empty v-if="servers.length === 0" description="暂无服务器配置" style="margin-top: 48px" />
+    <a-card :bordered="false">
+      <!-- 搜索栏 -->
+      <div class="search-bar" style="margin-bottom: 16px">
+        <a-input
+          v-model:value="searchKeyword"
+          placeholder="搜索服务器名称或地址"
+          style="width: 300px"
+          allow-clear
+        />
+      </div>
 
-    <a-modal v-model:open="modalVisible" :title="editingId ? '编辑服务器' : '添加服务器'" @ok="handleSave">
+      <!-- 表格 -->
+      <a-table
+        :data-source="filteredServers"
+        :columns="columns"
+        row-key="id"
+        :pagination="{ pageSize: 10, showSizeChanger: true }"
+        :scroll="{ x: 1000 }"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'tlsEnable'">
+            <a-tag :color="record.tlsEnable ? 'green' : 'default'">
+              {{ record.tlsEnable ? '✓' : '✗' }}
+            </a-tag>
+          </template>
+          <template v-if="column.key === 'enabled'">
+            <a-switch v-model:checked="record.enabled" size="small" />
+          </template>
+          <template v-if="column.key === 'action'">
+            <a-space>
+              <a-button size="small" type="primary" @click="openEdit(record)">编辑</a-button>
+              <a-popconfirm title="确定删除？" @confirm="handleDelete(record)">
+                <a-button size="small" danger>删除</a-button>
+              </a-popconfirm>
+            </a-space>
+          </template>
+        </template>
+      </a-table>
+
+      <a-empty v-if="filteredServers.length === 0" description="暂无服务器配置" style="margin-top: 48px" />
+    </a-card>
+
+    <!-- 编辑对话框 -->
+    <a-modal
+      v-model:open="modalVisible"
+      :title="editingId ? '编辑服务器' : '添加服务器'"
+      @ok="handleSave"
+      width="600px"
+    >
       <a-form :model="form" layout="vertical">
         <a-form-item label="名称" required>
           <a-input v-model:value="form.name" placeholder="请输入服务器名称" />
@@ -115,8 +155,14 @@ const servers = computed(() => appStore.servers);
   </div>
 </template>
 
-<style scoped lang="scss">
-.servers-page { padding: 24px; height: calc(100vh - 60px); overflow-y: auto; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-.page-title { font-size: 24px; font-weight: 600; }
+<style scoped>
+.page-container {
+  padding: 24px;
+}
+
+.search-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
 </style>

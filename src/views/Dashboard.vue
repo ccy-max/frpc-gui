@@ -3,15 +3,9 @@ import { computed, ref, onMounted, onUnmounted, watch, h } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter } from 'vue-router';
 import {
-  PlusOutlined,
-  PlayCircleOutlined,
-  PauseCircleOutlined,
-  FileTextOutlined,
-  SettingOutlined,
-  CheckCircleOutlined,
-  ClockCircleOutlined,
-  CloudServerOutlined,
-  ThunderboltOutlined
+  PlusOutlined, PlayCircleOutlined, PauseCircleOutlined,
+  CheckCircleOutlined, ClockCircleOutlined,
+  CloudServerOutlined, ThunderboltOutlined
 } from '@ant-design/icons-vue';
 
 const appStore = useAppStore();
@@ -24,25 +18,25 @@ const stats = computed(() => [
   {
     title: '运行状态',
     value: appStore.isRunning ? '运行中' : '已停止',
-    prefix: h(CheckCircleOutlined),
+    prefix: () => h(CheckCircleOutlined),
     valueStyle: { color: appStore.isRunning ? '#52c41a' : '#8c8c8c' }
   },
   {
     title: '运行时长',
     value: formatUptime(uptimeSeconds.value),
-    prefix: h(ClockCircleOutlined),
+    prefix: () => h(ClockCircleOutlined),
     valueStyle: { color: '#1677ff' }
   },
   {
     title: '代理总数',
     value: appStore.proxies.length,
-    prefix: h(CloudServerOutlined),
+    prefix: () => h(CloudServerOutlined),
     valueStyle: { color: '#722ed1' }
   },
   {
     title: '活跃代理',
     value: appStore.activeProxiesCount,
-    prefix: h(ThunderboltOutlined),
+    prefix: () => h(ThunderboltOutlined),
     valueStyle: { color: '#faad14' }
   },
 ]);
@@ -88,14 +82,17 @@ const logColors: Record<string, string> = { debug: 'purple', info: 'blue', warn:
   <div class="dashboard-container">
     <!-- 统计卡片 -->
     <a-row :gutter="[16, 16]" style="margin-bottom: 24px">
-      <a-col :span="6" v-for="(stat, index) in stats" :key="index">
+      <a-col :xs="24" :sm="12" :md="6" v-for="(stat, index) in stats" :key="index">
         <a-card :bordered="false" class="stat-card">
           <a-statistic
             :title="stat.title"
             :value="stat.value"
             :value-style="stat.valueStyle"
-            :prefix="stat.prefix.component"
-          />
+          >
+            <template #prefix>
+              <component :is="stat.prefix" />
+            </template>
+          </a-statistic>
         </a-card>
       </a-col>
     </a-row>
