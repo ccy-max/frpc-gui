@@ -120,6 +120,7 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
         row-key="name"
         :pagination="{ pageSize: 10, showSizeChanger: true }"
         :scroll="{ x: 1200 }"
+        :locale="{ emptyText: ' ' }"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'type'">

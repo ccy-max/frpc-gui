@@ -100,6 +100,7 @@ function handleDelete(server: any) {
         row-key="id"
         :pagination="{ pageSize: 10, showSizeChanger: true }"
         :scroll="{ x: 1000 }"
+        :locale="{ emptyText: ' ' }"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'tlsEnable'">
