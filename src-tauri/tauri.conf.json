@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "FRPC GUI",
+  "productName": "frpc-gui",
   "version": "0.1.0",
   "identifier": "com.comdustinkyqwenpaw.frpc-gui",
   "build": {
