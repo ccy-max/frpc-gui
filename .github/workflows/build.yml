@@ -1,15 +1,14 @@
 # GitHub Actions 自动构建 Windows EXE
-# 触发条件：push 到 main 分支 或 创建 release tag
+# 触发条件：创建版本标签 (v*) 或手动触发
+# 日常开发提交不会触发构建，节省配额
 
 name: Build Windows EXE
 
 on:
   push:
-    branches: [main, master]
-    tags: ['v*']
-  pull_request:
-    branches: [main, master]
-  workflow_dispatch: # 允许手动触发
+    tags:
+      - 'v*'  # 只有创建 v0.1.0, v1.2.3 等标签时才触发构建
+  workflow_dispatch:  # 允许手动触发（在 Actions 页面点击 "Run workflow"）
 
 env:
   CARGO_TERM_COLOR: always
