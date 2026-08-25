@@ -123,6 +123,7 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
         row-key="name"
         :pagination="{ pageSize: 10, showSizeChanger: true, showQuickJumper: true }"
         :scroll="{ x: 940 }"
+        :locale="{ emptyText: ' ' }"
         size="middle"
       >
         <template #bodyCell="{ column, record }">

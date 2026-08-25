@@ -94,6 +94,7 @@ function handleDelete(server: any) {
         row-key="id"
         :pagination="{ pageSize: 10, showSizeChanger: true, showQuickJumper: true }"
         :scroll="{ x: 830 }"
+        :locale="{ emptyText: ' ' }"
         size="middle"
       >
         <template #bodyCell="{ column, record }">
