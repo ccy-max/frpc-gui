@@ -194,6 +194,24 @@ async function pickFile(field: string, ext: string[]) {
                 <a-select-option value="auto">跟随系统</a-select-option>
               </a-select>
             </a-form-item>
+            <a-form-item label="默认服务器">
+              <a-select 
+                v-model:value="appStore.defaultServerId" 
+                @change="handleConfigChange" 
+                style="width: 100%"
+                placeholder="选择新建代理时默认关联的服务器"
+                allow-clear
+              >
+                <a-select-option
+                  v-for="server in appStore.servers"
+                  :key="server.id"
+                  :value="server.id"
+                >
+                  {{ server.name }} ({{ server.serverAddr }}:{{ server.serverPort }})
+                </a-select-option>
+              </a-select>
+              <div class="form-help">新建代理时会自动关联到此服务器，留空则使用活动服务器</div>
+            </a-form-item>
             <a-form-item label="启动选项">
               <a-space direction="vertical">
                 <a-checkbox v-model:checked="appStore.autoStart" @change="handleConfigChange">开机自启</a-checkbox>
@@ -480,5 +498,12 @@ async function pickFile(field: string, ext: string[]) {
     border-radius: 8px;
     font-family: 'Courier New', monospace;
   }
+}
+
+.form-help {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #64748b;
+  font-style: italic;
 }
 </style>

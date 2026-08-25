@@ -50,3 +50,6 @@ coverage
 # Misc
 .cache
 .temp
+
+# Persistent data (user-specific, should not be committed)
+frpc-gui-data.json

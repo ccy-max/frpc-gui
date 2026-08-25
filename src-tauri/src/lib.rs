@@ -81,6 +81,17 @@ pub fn run() {
             commands::get_process_status,
             commands::detect_frpc_process,
             commands::modify_proxy_status,
+            // 多服务器进程控制
+            commands::start_server,
+            commands::stop_server,
+            commands::restart_server,
+            commands::get_server_status,
+            commands::get_all_servers_status,
+            commands::get_all_proxy_status,
+            commands::get_server_traffic,
+            commands::get_traffic_history,
+            commands::get_connection_history,
+            commands::log_connection_event,
             // 日志
             commands::get_logs,
             commands::get_frpc_log_content,
@@ -102,6 +113,9 @@ pub fn run() {
             commands::select_local_file,
             commands::check_app_update,
             commands::get_local_ports,
+            // 持久化数据
+            commands::load_persistent_data,
+            commands::save_persistent_data,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

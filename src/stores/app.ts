@@ -14,6 +14,7 @@ export const useAppStore = defineStore('app', () => {
   const autoStart = ref(false);
   const minimizeToTray = ref(true);
   const closeToTray = ref(true);
+  const defaultServerId = ref<string | null>(null);  // 默认服务器 ID
 
   // FRP 配置
   const frpConfig = ref<FrpConfig | null>(null);
@@ -37,6 +38,13 @@ export const useAppStore = defineStore('app', () => {
   const downloadedVersions = ref<any[]>([]);
   const localPorts = ref<any[]>([]);
   const mirrors = ref<any[]>([]);
+  
+  // 服务器状态（多进程支持）
+  const serverStatuses = ref<Map<string, any>>(new Map());
+  const proxyStatuses = ref<Map<string, any>>(new Map());  // 代理状态
+  const serverTraffic = ref<Map<string, any>>(new Map());  // 服务器流量
+  const trafficHistory = ref<any[]>([]);  // 流量历史
+  const connectionHistory = ref<any[]>([]);  // 连接历史
 
   // 计算属性
   const isRunning = computed(() => processStatus.value.running);
@@ -59,6 +67,7 @@ export const useAppStore = defineStore('app', () => {
       autoStart.value = s.auto_start || false;
       minimizeToTray.value = s.minimize_to_tray ?? true;
       closeToTray.value = s.close_to_tray ?? true;
+      defaultServerId.value = s.default_server_id || null;
       applyTheme(theme.value);
     } catch (e) {
       console.error('Failed to load settings:', e);
@@ -77,6 +86,7 @@ export const useAppStore = defineStore('app', () => {
           auto_start: autoStart.value,
           minimize_to_tray: minimizeToTray.value,
           close_to_tray: closeToTray.value,
+          default_server_id: defaultServerId.value,
         }
       });
     } catch (e) {
@@ -102,6 +112,11 @@ export const useAppStore = defineStore('app', () => {
 
   function setLanguage(lang: 'zh-CN' | 'en-US') {
     language.value = lang;
+    saveSettings();
+  }
+
+  function setDefaultServerId(id: string | null) {
+    defaultServerId.value = id;
     saveSettings();
   }
 
@@ -197,6 +212,8 @@ export const useAppStore = defineStore('app', () => {
       logs.value = [];
       versions.value = [];
       frpcPath.value = '';
+      // 同时清空持久化数据
+      await savePersistentData();
       return { success: true };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -222,29 +239,38 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // ===== 服务器管理 =====
-  function addServer(data: any) { servers.value.push(data); }
-  function updateServer(id: string, updates: any) {
+  async function addServer(data: any) {
+    servers.value.push(data);
+    await savePersistentData();
+  }
+  async function updateServer(id: string, updates: any) {
     const i = servers.value.findIndex(s => s.id === id);
-    if (i !== -1) servers.value[i] = { ...servers.value[i], ...updates };
-  }
-  function deleteServer(id: string) { servers.value = servers.value.filter(s => s.id !== id); }
-
-  // ===== 代理管理 =====
-  function addProxy(data: any) {
-    proxies.value.push(data);
-    if (frpConfig.value) frpConfig.value.proxies.push(data);
-  }
-  function updateProxy(name: string, updates: any) {
-    const i = proxies.value.findIndex(p => p.name === name);
-    if (i !== -1) proxies.value[i] = { ...proxies.value[i], ...updates };
-    if (frpConfig.value) {
-      const ci = frpConfig.value.proxies.findIndex(p => p.name === name);
-      if (ci !== -1) frpConfig.value.proxies[ci] = { ...frpConfig.value.proxies[ci], ...updates };
+    if (i !== -1) {
+      servers.value[i] = { ...servers.value[i], ...updates };
+      await savePersistentData();
     }
   }
-  function deleteProxy(name: string) {
+  async function deleteServer(id: string) {
+    servers.value = servers.value.filter(s => s.id !== id);
+    await savePersistentData();
+  }
+
+  // ===== 代理管理 =====
+  async function addProxy(data: any) {
+    // 只添加到 proxies.value，避免重复
+    proxies.value.push(data);
+    await savePersistentData();
+  }
+  async function updateProxy(name: string, updates: any) {
+    const i = proxies.value.findIndex(p => p.name === name);
+    if (i !== -1) {
+      proxies.value[i] = { ...proxies.value[i], ...updates };
+      await savePersistentData();
+    }
+  }
+  async function deleteProxy(name: string) {
     proxies.value = proxies.value.filter(p => p.name !== name);
-    if (frpConfig.value) frpConfig.value.proxies = frpConfig.value.proxies.filter(p => p.name !== name);
+    await savePersistentData();
   }
 
   async function modifyProxyStatus(name: string, enabled: boolean) {
@@ -254,6 +280,140 @@ export const useAppStore = defineStore('app', () => {
       return { success: true };
     } catch (e) {
       return { success: false, error: String(e) };
+    }
+  }
+
+  // ===== 多服务器 FRP 进程控制 =====
+  async function startServer(serverId: string) {
+    const server = servers.value.find(s => s.id === serverId);
+    if (!server) throw new Error('服务器不存在');
+    
+    // 获取该服务器的所有代理
+    const serverProxies = proxies.value.filter(p => p.server_id === serverId);
+    
+    // 构建配置
+    const config = {
+      serverAddr: server.serverAddr,
+      serverPort: server.serverPort,
+      token: server.token,
+      tlsEnable: server.tlsEnable,
+      proxies: serverProxies.map(p => ({
+        ...p,
+        local_port: String(p.local_port),
+        remote_port: String(p.remote_port),
+      })),
+    };
+    
+    await invoke('start_server', { serverId, config });
+    await refreshServerStatus(serverId);
+  }
+
+  async function stopServer(serverId: string) {
+    await invoke('stop_server', { serverId });
+    await refreshServerStatus(serverId);
+  }
+
+  async function restartServer(serverId: string) {
+    const server = servers.value.find(s => s.id === serverId);
+    if (!server) throw new Error('服务器不存在');
+    
+    const serverProxies = proxies.value.filter(p => p.server_id === serverId);
+    
+    const config = {
+      serverAddr: server.serverAddr,
+      serverPort: server.serverPort,
+      token: server.token,
+      tlsEnable: server.tlsEnable,
+      proxies: serverProxies.map(p => ({
+        ...p,
+        local_port: String(p.local_port),
+        remote_port: String(p.remote_port),
+      })),
+    };
+    
+    await invoke('restart_server', { serverId, config });
+    await refreshServerStatus(serverId);
+  }
+
+  async function refreshServerStatus(serverId?: string) {
+    try {
+      if (serverId) {
+        const status = await invoke<any>('get_server_status', { serverId });
+        serverStatuses.value.set(serverId, status);
+      } else {
+        const statuses = await invoke<any[]>('get_all_servers_status');
+        serverStatuses.value = new Map(statuses.map(s => [s.server_id, s]));
+      }
+    } catch (e) {
+      console.error('Failed to refresh server status:', e);
+    }
+  }
+
+  // ===== 监控功能 =====
+  async function refreshProxyStatus() {
+    try {
+      const statuses = await invoke<any[]>('get_all_proxy_status');
+      proxyStatuses.value = new Map(statuses.map(s => [`${s.server_id}-${s.name}`, s]));
+    } catch (e) {
+      console.error('Failed to refresh proxy status:', e);
+    }
+  }
+
+  async function refreshServerTraffic(serverId?: string) {
+    try {
+      if (serverId) {
+        const traffic = await invoke('get_server_traffic', { serverId });
+        serverTraffic.value.set(serverId, traffic);
+      } else {
+        // 刷新所有服务器的流量
+        for (const server of servers.value) {
+          try {
+            const traffic = await invoke('get_server_traffic', { serverId: server.id });
+            serverTraffic.value.set(server.id, traffic);
+          } catch (e) {
+            console.error(`Failed to get traffic for server ${server.id}:`, e);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to refresh server traffic:', e);
+    }
+  }
+
+  // 获取代理的状态
+  function getProxyStatus(serverId: string, proxyName: string): any {
+    return proxyStatuses.value.get(`${serverId}-${proxyName}`);
+  }
+
+  // 获取服务器的流量
+  function getServerTraffic(serverId: string): any {
+    return serverTraffic.value.get(serverId);
+  }
+
+  // 格式化流量显示
+  function formatTraffic(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  }
+
+  // ===== 历史数据加载 =====
+  async function loadTrafficHistory(days: number = 30) {
+    try {
+      trafficHistory.value = await invoke('get_traffic_history', { days });
+    } catch (e) {
+      console.error('Failed to load traffic history:', e);
+      trafficHistory.value = [];
+    }
+  }
+
+  async function loadConnectionHistory(proxyName?: string, serverId?: string) {
+    try {
+      connectionHistory.value = await invoke('get_connection_history', { proxyName, serverId });
+    } catch (e) {
+      console.error('Failed to load connection history:', e);
+      connectionHistory.value = [];
     }
   }
 
@@ -446,33 +606,87 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  // ===== 持久化数据管理 =====
+  async function savePersistentData() {
+    try {
+      await invoke<boolean>('save_persistent_data', {
+        data: {
+          servers: servers.value,
+          proxies: proxies.value,
+        }
+      });
+    } catch (e) {
+      console.error('Failed to save persistent data:', e);
+    }
+  }
+
+  async function loadPersistentData() {
+    try {
+      const data = await invoke<any>('load_persistent_data');
+      if (data && data.servers) {
+        servers.value = data.servers || [];
+      }
+      if (data && data.proxies) {
+        proxies.value = data.proxies || [];
+      }
+    } catch (e) {
+      console.error('Failed to load persistent data:', e);
+    }
+  }
+
   // ===== 初始化 =====
   let statusTimer: ReturnType<typeof setInterval> | null = null;
+  
   function init() {
     applyTheme(theme.value);
     if (statusTimer === null) {
-      statusTimer = setInterval(refreshProcessStatus, 5000);
+      statusTimer = setInterval(() => {
+        refreshProcessStatus();
+        refreshServerStatus(); // 刷新所有服务器状态
+        refreshProxyStatus();  // 刷新代理状态
+        refreshServerTraffic(); // 刷新流量统计
+      }, 5000);
     }
     loadSettings();
     loadMirrors();
+    loadPersistentData();
+    loadTrafficHistory();  // 加载流量历史
+    loadConnectionHistory(); // 加载连接历史
+  }
+  
+  // 清理定时器（防止内存泄漏）
+  function cleanup() {
+    if (statusTimer !== null) {
+      clearInterval(statusTimer);
+      statusTimer = null;
+    }
   }
 
   return {
     // State
     theme, language, frpcPath, configPath, logPath,
-    autoStart, minimizeToTray, closeToTray,
+    autoStart, minimizeToTray, closeToTray, defaultServerId,
     frpConfig, processStatus, logs, frpcLogContent, autoScrollLogs,
     servers, proxies, versions, downloadedVersions, localPorts, mirrors,
+    serverStatuses,
     // Getters
     isRunning, runningServersCount, activeProxies, activeProxiesCount,
     // Settings
     setTheme, setLanguage, loadSettings, saveSettings,
     pickFrpcPath, pickConfigPath, pickLogPath,
+    setDefaultServerId,
     // Config
     loadConfig, saveConfig, resetAllConfig, importTomlConfig,
     // Server/Proxy
     addServer, updateServer, deleteServer,
     addProxy, updateProxy, deleteProxy, modifyProxyStatus,
+    // Multi-Server Process Control
+    startServer, stopServer, restartServer, refreshServerStatus,
+    // Monitoring
+    refreshProxyStatus, refreshServerTraffic, getProxyStatus, getServerTraffic, formatTraffic,
+    loadTrafficHistory, loadConnectionHistory,
+    // Persistence
+    savePersistentData, loadPersistentData,
     // Process
     startFRP, stopFRP, restartFRP, reloadFRP, refreshProcessStatus, detectFrpcProcess,
     // Logs
@@ -484,5 +698,6 @@ export const useAppStore = defineStore('app', () => {
     openUrl, relaunchApp, openAppData, checkAppUpdate, loadLocalPorts,
     // Init
     init,
+    cleanup,
   };
 });

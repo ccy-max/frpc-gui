@@ -16,6 +16,7 @@ pub struct AppSettings {
     pub auto_start: bool,
     pub minimize_to_tray: bool,
     pub close_to_tray: bool,
+    pub default_server_id: Option<String>,  // 默认服务器 ID
 }
 
 impl Default for AppSettings {
@@ -32,6 +33,7 @@ impl Default for AppSettings {
             auto_start: false,
             minimize_to_tray: true,
             close_to_tray: true,
+            default_server_id: None,
         }
     }
 }

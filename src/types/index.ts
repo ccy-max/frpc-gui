@@ -74,6 +74,7 @@ export interface ProxyConfig {
   name: string;
   type: ProxyType;
   enabled: boolean;
+  serverId?: string;  // 关联的服务器 ID
   
   // 通用
   local_ip?: string;
