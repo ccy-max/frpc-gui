@@ -123,9 +123,11 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
         row-key="name"
         :pagination="{ pageSize: 10, showSizeChanger: true, showQuickJumper: true }"
         :scroll="{ x: 940 }"
-        :locale="{ emptyText: ' ' }"
         size="middle"
       >
+        <template #emptyText>
+          <a-empty description="暂无代理配置" style="margin: 48px 0" />
+        </template>
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'type'">
             <a-tag color="blue">{{ record.type.toUpperCase() }}</a-tag>
@@ -337,15 +339,6 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
 
     .ant-table-tbody > tr:hover > td {
       background: #f8fafc;
-    }
-
-    // 隐藏空状态时的底部边框
-    .ant-table-placeholder {
-      border-bottom: none !important;
-      
-      &:hover {
-        background: #ffffff !important;
-      }
     }
   }
 

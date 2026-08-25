@@ -94,9 +94,11 @@ function handleDelete(server: any) {
         row-key="id"
         :pagination="{ pageSize: 10, showSizeChanger: true, showQuickJumper: true }"
         :scroll="{ x: 830 }"
-        :locale="{ emptyText: ' ' }"
         size="middle"
       >
+        <template #emptyText>
+          <a-empty description="暂无服务器配置" style="margin: 48px 0" />
+        </template>
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'tlsEnable'">
             <a-tag :color="record.tlsEnable ? 'green' : 'default'">
@@ -116,8 +118,6 @@ function handleDelete(server: any) {
           </template>
         </template>
       </a-table>
-
-      <a-empty v-if="filteredServers.length === 0" description="暂无服务器配置" style="margin-top: 48px" />
     </a-card>
 
     <a-modal
@@ -204,15 +204,6 @@ function handleDelete(server: any) {
 
     .ant-table-tbody > tr:hover > td {
       background: #f8fafc;
-    }
-
-    // 隐藏空状态时的底部边框
-    .ant-table-placeholder {
-      border-bottom: none !important;
-      
-      &:hover {
-        background: #ffffff !important;
-      }
     }
   }
 
