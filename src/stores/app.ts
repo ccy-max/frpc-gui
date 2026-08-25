@@ -168,7 +168,17 @@ export const useAppStore = defineStore('app', () => {
 
   async function saveConfig(config: FrpConfig) {
     try {
-      const result = await invoke<any>('save_config', { config });
+      // 转换端口为字符串（frpc TOML 期望字符串）
+      const configToSave = {
+        ...config,
+        server_port: String(config.server_port),
+        proxies: config.proxies?.map(p => ({
+          ...p,
+          local_port: p.local_port ? String(p.local_port) : undefined,
+          remote_port: p.remote_port ? String(p.remote_port) : undefined,
+        })) || [],
+      };
+      const result = await invoke<any>('save_config', { config: configToSave });
       if (result.success && result.config) {
         frpConfig.value = result.config;
       }
