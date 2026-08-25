@@ -199,7 +199,6 @@ function handleDelete(server: any) {
       background: #f8fafc;
       font-weight: 600;
       color: #475569;
-      border-radius: 6px;
     }
 
     .ant-table-tbody > tr:hover > td {

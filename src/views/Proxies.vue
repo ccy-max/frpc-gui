@@ -334,7 +334,6 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
       background: #f8fafc;
       font-weight: 600;
       color: #475569;
-      border-radius: 6px;
     }
 
     .ant-table-tbody > tr:hover > td {
