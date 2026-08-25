@@ -20,25 +20,25 @@ const stats = computed(() => [
     title: '运行状态',
     value: appStore.isRunning ? '运行中' : '已停止',
     prefix: () => h(CheckCircleOutlined),
-    valueStyle: { color: appStore.isRunning ? '#52c41a' : '#8c8c8c' }
+    valueStyle: { color: appStore.isRunning ? '#10b981' : '#64748b' }
   },
   {
     title: '运行时长',
     value: formatUptime(uptimeSeconds.value),
     prefix: () => h(ClockCircleOutlined),
-    valueStyle: { color: '#1677ff' }
+    valueStyle: { color: '#2563eb' }
   },
   {
     title: '代理总数',
     value: appStore.proxies.length,
     prefix: () => h(CloudServerOutlined),
-    valueStyle: { color: '#722ed1' }
+    valueStyle: { color: '#7c3aed' }
   },
   {
     title: '活跃代理',
     value: appStore.activeProxiesCount,
     prefix: () => h(ThunderboltOutlined),
-    valueStyle: { color: '#faad14' }
+    valueStyle: { color: '#f59e0b' }
   },
 ]);
 
@@ -81,9 +81,12 @@ const logColors: Record<string, string> = { debug: 'purple', info: 'blue', warn:
 
 <template>
   <div class="dashboard-container">
-    <!-- 统计卡片 -->
+    <div class="page-header">
+      <h1 class="page-title">概览</h1>
+    </div>
+
     <a-row :gutter="[16, 16]" style="margin-bottom: 24px">
-      <a-col :xs="24" :sm="12" :md="6" v-for="(stat, index) in stats" :key="index">
+      <a-col :xs="24" :sm="12" :lg="6" v-for="(stat, index) in stats" :key="index">
         <a-card :bordered="false" class="stat-card">
           <a-statistic
             :title="stat.title"
@@ -98,8 +101,7 @@ const logColors: Record<string, string> = { debug: 'purple', info: 'blue', warn:
       </a-col>
     </a-row>
 
-    <!-- 快速操作 -->
-    <a-card title="快速操作" style="margin-bottom: 24px">
+    <a-card title="快速操作" class="action-card" style="margin-bottom: 24px">
       <a-space wrap>
         <a-button type="primary" @click="router.push('/servers')">
           <template #icon><PlusOutlined /></template>
@@ -109,7 +111,7 @@ const logColors: Record<string, string> = { debug: 'purple', info: 'blue', warn:
           <template #icon><PlayCircleOutlined /></template>
           启动 FRP
         </a-button>
-        <a-button danger @click="appStore.stopFRP()" :disabled="!appStore.isRunning">
+        <a-button danger ghost @click="appStore.stopFRP()" :disabled="!appStore.isRunning">
           <template #icon><PauseCircleOutlined /></template>
           停止 FRP
         </a-button>
@@ -124,8 +126,7 @@ const logColors: Record<string, string> = { debug: 'purple', info: 'blue', warn:
       </a-space>
     </a-card>
 
-    <!-- 最近日志 -->
-    <a-card title="最近日志">
+    <a-card title="最近日志" class="logs-card">
       <template #extra>
         <a-button type="link" @click="router.push('/logs')">查看全部</a-button>
       </template>
@@ -149,22 +150,83 @@ const logColors: Record<string, string> = { debug: 'purple', info: 'blue', warn:
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .dashboard-container {
   padding: 24px;
 }
 
+.page-header {
+  margin-bottom: 24px;
+
+  .page-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+  }
+}
+
 .stat-card {
-  text-align: center;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: all 0.2s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  }
+
+  :deep(.ant-statistic-title) {
+    font-size: 14px;
+    color: #64748b;
+    font-weight: 500;
+  }
+
+  :deep(.ant-statistic-content) {
+    font-size: 28px;
+    font-weight: 700;
+  }
+
+  :deep(.ant-statistic .anticon) {
+    font-size: 20px;
+  }
 }
 
-.stat-card :deep(.ant-statistic-title) {
-  font-size: 14px;
-  color: rgba(0, 0, 0, 0.45);
+.action-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  :deep(.ant-card-head) {
+    font-weight: 600;
+    font-size: 16px;
+    color: #1e293b;
+  }
+
+  .ant-btn {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
 }
 
-.stat-card :deep(.ant-statistic-content) {
-  font-size: 24px;
-  font-weight: 600;
+.logs-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  :deep(.ant-card-head) {
+    font-weight: 600;
+    font-size: 16px;
+    color: #1e293b;
+  }
 }
 </style>

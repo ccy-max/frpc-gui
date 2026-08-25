@@ -28,7 +28,6 @@ const menuItems = [
   { key: 'about', icon: InfoCircleOutlined, label: '关于' },
 ];
 
-// 监听路由变化，同步菜单选中状态
 watch(() => route.path, (newPath) => {
   const path = newPath.replace('/', '');
   if (path && menuItems.some(item => item.key === path)) {
@@ -43,9 +42,11 @@ const handleMenuSelect = ({ key }: { key: string }) => {
 
 <template>
   <a-layout class="app-container">
-    <!-- 侧边栏 -->
-    <a-layout-sider width="220" class="app-sider" :trigger="null">
+    <a-layout-sider width="240" class="app-sider" :trigger="null">
       <div class="logo">
+        <div class="logo-icon">
+          <CloudServerOutlined />
+        </div>
         <span class="logo-text">FRPC GUI</span>
       </div>
 
@@ -57,21 +58,21 @@ const handleMenuSelect = ({ key }: { key: string }) => {
         @select="handleMenuSelect"
       >
         <a-menu-item v-for="item in menuItems" :key="item.key">
-          <component :is="item.icon" />
-          <span>{{ item.label }}</span>
+          <template #icon>
+            <component :is="item.icon" />
+          </template>
+          {{ item.label }}
         </a-menu-item>
       </a-menu>
 
-      <!-- 底部状态 -->
       <div class="sider-footer">
-        <a-badge
-          :status="appStore.isRunning ? 'success' : 'default'"
-          :text="appStore.isRunning ? '运行中' : '已停止'"
-        />
+        <div class="status-card">
+          <a-badge :status="appStore.isRunning ? 'success' : 'default'" />
+          <span class="status-text">{{ appStore.isRunning ? '运行中' : '已停止' }}</span>
+        </div>
       </div>
     </a-layout-sider>
 
-    <!-- 主内容区 -->
     <a-layout-content class="app-content">
       <router-view />
     </a-layout-content>
@@ -81,41 +82,88 @@ const handleMenuSelect = ({ key }: { key: string }) => {
 <style scoped lang="scss">
 .app-container {
   height: 100vh;
-  width: 100%;
+  background: #f8fafc;
 }
 
 .app-sider {
-  display: flex;
-  flex-direction: column;
-
+  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  overflow: hidden;
+  
   .logo {
-    height: 60px;
+    height: 64px;
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 12px;
+    padding: 0 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(37, 99, 235, 0.2);
+      border-radius: 10px;
+      color: #60a5fa;
+      font-size: 20px;
+    }
 
     .logo-text {
       font-size: 18px;
-      font-weight: 600;
+      font-weight: 700;
       color: #ffffff;
+      letter-spacing: 0.5px;
     }
   }
 
   .app-menu {
     flex: 1;
-    border-right: none;
-    padding-top: 8px;
+    border-right: none !important;
+    background: transparent !important;
+    
+    :deep(.ant-menu-item) {
+      margin: 4px 8px;
+      border-radius: 8px;
+      transition: all 0.2s ease;
+      
+      &:hover {
+        background: rgba(255, 255, 255, 0.08) !important;
+      }
+      
+      &.ant-menu-item-selected {
+        background: linear-gradient(90deg, rgba(37, 99, 235, 0.2), rgba(37, 99, 235, 0.1)) !important;
+        color: #60a5fa !important;
+        
+        .anticon {
+          color: #60a5fa !important;
+        }
+      }
+    }
   }
 
   .sider-footer {
     padding: 16px 24px;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
+
+    .status-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+
+      .status-text {
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 13px;
+        font-weight: 500;
+      }
+    }
   }
 }
 
 .app-content {
-  padding: 0;
-  overflow: hidden;
-  background: var(--app-bg-color);
+  overflow-y: auto;
 }
 </style>

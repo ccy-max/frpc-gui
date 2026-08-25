@@ -23,8 +23,8 @@ const filteredServers = computed(() => {
 });
 
 const columns = [
-  { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true, width: 150 },
-  { title: '服务器地址', dataIndex: 'serverAddr', key: 'serverAddr', ellipsis: true, width: 180 },
+  { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true, width: 180 },
+  { title: '服务器地址', dataIndex: 'serverAddr', key: 'serverAddr', ellipsis: true, width: 200 },
   { title: '端口', dataIndex: 'serverPort', key: 'serverPort', width: 80 },
   { title: 'TLS', key: 'tlsEnable', width: 60 },
   { title: '启用', key: 'enabled', width: 70 },
@@ -72,20 +72,19 @@ function handleDelete(server: any) {
 
 <template>
   <div class="page-container">
-    <a-page-header title="服务器管理">
-      <template #extra>
-        <a-button type="primary" @click="openAdd">
-          <template #icon><PlusOutlined /></template>
-          添加服务器
-        </a-button>
-      </template>
-    </a-page-header>
+    <div class="page-header">
+      <h1 class="page-title">服务器管理</h1>
+      <a-button type="primary" @click="openAdd">
+        <template #icon><PlusOutlined /></template>
+        添加服务器
+      </a-button>
+    </div>
 
-    <a-card :bordered="false">
+    <a-card class="content-card">
       <a-input
         v-model:value="searchKeyword"
         placeholder="搜索服务器名称或地址"
-        style="width: 300px; margin-bottom: 16px"
+        class="search-input"
         allow-clear
       />
 
@@ -94,7 +93,7 @@ function handleDelete(server: any) {
         :columns="columns"
         row-key="id"
         :pagination="{ pageSize: 10, showSizeChanger: true, showQuickJumper: true }"
-        :scroll="{ x: 780 }"
+        :scroll="{ x: 830 }"
         size="middle"
       >
         <template #bodyCell="{ column, record }">
@@ -150,8 +149,95 @@ function handleDelete(server: any) {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .page-container {
   padding: 24px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+
+  .page-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+  }
+
+  .ant-btn {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+}
+
+.content-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  .search-input {
+    width: 320px;
+    margin-bottom: 16px;
+    border-radius: 8px;
+  }
+
+  :deep(.ant-table) {
+    .ant-table-thead > tr > th {
+      background: #f8fafc;
+      font-weight: 600;
+      color: #475569;
+      border-radius: 6px;
+    }
+
+    .ant-table-tbody > tr:hover > td {
+      background: #f8fafc;
+    }
+  }
+
+  .ant-btn {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+}
+
+.ant-modal {
+  .ant-modal-content {
+    border-radius: 12px;
+  }
+
+  .ant-modal-header {
+    border-radius: 12px 12px 0 0;
+    font-weight: 600;
+  }
+
+  .ant-btn-primary {
+    border-radius: 8px;
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
 }
 </style>
