@@ -338,6 +338,15 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
     .ant-table-tbody > tr:hover > td {
       background: #f8fafc;
     }
+
+    // 隐藏空状态时的底部边框
+    .ant-table-placeholder {
+      border-bottom: none !important;
+      
+      &:hover {
+        background: #ffffff !important;
+      }
+    }
   }
 
   .ant-btn {
