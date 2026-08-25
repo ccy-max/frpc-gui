@@ -54,10 +54,79 @@ async function checkUpdate() {
 </template>
 
 <style scoped lang="scss">
-.about-page { padding: 24px; display: flex; justify-content: center; align-items: center; height: calc(100vh - 60px); }
-.about-card { max-width: 500px; width: 100%; }
-.logo-section { text-align: center; padding: 24px 0; }
-.app-name { font-size: 28px; font-weight: 700; margin: 0 0 8px; }
-.description { color: #8c8c8c; font-size: 14px; }
-.links { margin-top: 24px; text-align: center; }
+.about-page {
+  padding: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(100vh - 60px);
+}
+
+.about-card {
+  max-width: 550px;
+  width: 100%;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  }
+}
+
+.logo-section {
+  text-align: center;
+  padding: 32px 0 24px;
+
+  .app-name {
+    font-size: 32px;
+    font-weight: 800;
+    margin: 0 0 8px;
+    background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .description {
+    color: #64748b;
+    font-size: 15px;
+    margin: 0;
+    font-weight: 400;
+  }
+}
+
+:deep(.ant-descriptions) {
+  .ant-descriptions-item-label {
+    font-weight: 600;
+    color: #475569;
+    background: #f8fafc;
+  }
+
+  .ant-descriptions-item-content {
+    color: #1e293b;
+  }
+}
+
+.links {
+  margin-top: 32px;
+  text-align: center;
+  padding: 16px 0;
+
+  .ant-btn {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+}
 </style>

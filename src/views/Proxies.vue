@@ -7,6 +7,7 @@ import { message, Modal } from 'ant-design-vue';
 const appStore = useAppStore();
 const searchKeyword = ref('');
 const modalVisible = ref(false);
+const editingName = ref<string | null>(null);
 
 const form = ref<any>({
   name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 8080,
@@ -37,15 +38,13 @@ const filteredProxies = computed(() => {
 });
 
 const columns = [
-  { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true, width: 150 },
+  { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true, width: 180 },
   { title: '类型', dataIndex: 'type', key: 'type', width: 100 },
   { title: '本地地址', key: 'local', width: 180, customRender: ({ record }: any) => `${record.local_ip}:${record.local_port}` },
   { title: '远程端口', dataIndex: 'remote_port', key: 'remote_port', width: 100 },
   { title: '状态', key: 'enabled', width: 80 },
-  { title: '操作', key: 'action', width: 220, fixed: 'right' as const },
+  { title: '操作', key: 'action', width: 200, fixed: 'right' as const },
 ];
-
-const editingName = ref<string | null>(null);
 
 function openAdd() {
   modalVisible.value = true;
@@ -102,34 +101,29 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
 
 <template>
   <div class="page-container">
-    <a-page-header title="代理管理">
-      <template #extra>
-        <a-button type="primary" @click="openAdd">
-          <template #icon><PlusOutlined /></template>
-          添加代理
-        </a-button>
-      </template>
-    </a-page-header>
+    <div class="page-header">
+      <h1 class="page-title">代理管理</h1>
+      <a-button type="primary" @click="openAdd">
+        <template #icon><PlusOutlined /></template>
+        添加代理
+      </a-button>
+    </div>
 
-    <a-card :bordered="false">
-      <!-- 搜索栏 -->
-      <div class="search-bar" style="margin-bottom: 16px">
-        <a-input
-          v-model:value="searchKeyword"
-          placeholder="搜索代理名称或类型"
-          style="width: 300px"
-          allow-clear
-        />
-      </div>
+    <a-card class="content-card">
+      <a-input
+        v-model:value="searchKeyword"
+        placeholder="搜索代理名称或类型"
+        class="search-input"
+        allow-clear
+      />
 
-      <!-- 表格 -->
       <a-table
         :data-source="filteredProxies"
         :columns="columns"
         row-key="name"
-        :pagination="{ pageSize: 10, showSizeChanger: true }"
-        :scroll="{ x: 1200 }"
-        :locale="{ emptyText: ' ' }"
+        :pagination="{ pageSize: 10, showSizeChanger: true, showQuickJumper: true }"
+        :scroll="{ x: 940 }"
+        size="middle"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'type'">
@@ -161,10 +155,9 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
       <a-empty v-if="filteredProxies.length === 0" description="暂无代理配置" style="margin-top: 48px" />
     </a-card>
 
-    <!-- 编辑对话框 -->
     <a-modal
       v-model:open="modalVisible"
-      :title="form.name ? '编辑代理' : '添加代理'"
+      :title="editingName ? '编辑代理' : '添加代理'"
       @ok="handleSave"
       width="900px"
     >
@@ -204,7 +197,6 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
           </a-col>
         </a-row>
 
-        <!-- HTTP/HTTPS 配置 -->
         <template v-if="isHttpType">
           <a-divider orientation="left">HTTP/HTTPS 配置</a-divider>
           <a-form-item label="自定义域名">
@@ -236,7 +228,6 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
           </a-row>
         </template>
 
-        <!-- STCP/XTCP 配置 -->
         <template v-if="isStcpType">
           <a-divider orientation="left">STCP/XTCP 配置</a-divider>
           <a-form-item label="共享密钥">
@@ -247,7 +238,6 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
           </a-form-item>
         </template>
 
-        <!-- 健康检查 -->
         <a-divider orientation="left">健康检查</a-divider>
         <a-row :gutter="16">
           <a-col :span="8">
@@ -282,7 +272,6 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
           </a-col>
         </a-row>
 
-        <!-- 其他选项 -->
         <a-divider orientation="left">其他选项</a-divider>
         <a-space>
           <a-checkbox v-model:checked="form.use_encryption">启用加密</a-checkbox>
@@ -293,14 +282,104 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .page-container {
   padding: 24px;
 }
 
-.search-bar {
+.page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 24px;
+
+  .page-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+  }
+
+  .ant-btn {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+}
+
+.content-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  .search-input {
+    width: 320px;
+    margin-bottom: 16px;
+    border-radius: 8px;
+  }
+
+  :deep(.ant-table) {
+    .ant-table-thead > tr > th {
+      background: #f8fafc;
+      font-weight: 600;
+      color: #475569;
+      border-radius: 6px;
+    }
+
+    .ant-table-tbody > tr:hover > td {
+      background: #f8fafc;
+    }
+  }
+
+  .ant-btn {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+}
+
+.ant-modal {
+  .ant-modal-content {
+    border-radius: 12px;
+  }
+
+  .ant-modal-header {
+    border-radius: 12px 12px 0 0;
+    font-weight: 600;
+  }
+
+  :deep(.ant-divider-with-text) {
+    &::before {
+      border-top-color: #e2e8f0;
+    }
+    &::after {
+      border-top-color: #e2e8f0;
+    }
+  }
+
+  .ant-btn-primary {
+    border-radius: 8px;
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
 }
 </style>

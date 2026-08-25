@@ -370,8 +370,115 @@ async function pickFile(field: string, ext: string[]) {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .page-container {
   padding: 24px;
+}
+
+.page-header {
+  margin-bottom: 24px;
+
+  .page-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+  }
+}
+
+.content-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  :deep(.ant-tabs) {
+    .ant-tabs-nav {
+      margin-bottom: 24px;
+      
+      .ant-tabs-tab {
+        padding: 12px 24px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        
+        &:hover {
+          color: #2563eb;
+        }
+      }
+
+      .ant-tabs-tab-active {
+        .ant-tabs-tab-btn {
+          color: #2563eb;
+          font-weight: 600;
+        }
+      }
+    }
+
+    .ant-tabs-content {
+      .ant-form-item-label > label {
+        font-weight: 500;
+        color: #475569;
+      }
+    }
+  }
+
+  :deep(.ant-divider-with-text) {
+    &::before {
+      border-top-color: #e2e8f0;
+    }
+    &::after {
+      border-top-color: #e2e8f0;
+    }
+  }
+
+  .ant-btn {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+
+  .ant-input, .ant-select, .ant-input-number {
+    border-radius: 8px;
+    transition: all 0.2s ease;
+
+    &:hover {
+      border-color: #2563eb;
+    }
+
+    &:focus {
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+    }
+  }
+}
+
+.ant-modal {
+  .ant-modal-content {
+    border-radius: 12px;
+  }
+
+  .ant-modal-header {
+    border-radius: 12px 12px 0 0;
+    font-weight: 600;
+  }
+
+  .ant-btn-primary {
+    border-radius: 8px;
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+
+  textarea {
+    border-radius: 8px;
+    font-family: 'Courier New', monospace;
+  }
 }
 </style>

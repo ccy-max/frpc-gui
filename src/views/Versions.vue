@@ -28,8 +28,6 @@ async function refresh() {
 
 async function download(record: any) {
   downloading.value = record.version;
-  
-  // 优先使用镜像 URL
   let url = record.mirror_url || record.download_url;
   
   message.loading(`正在下载 ${record.version}...`, 0);
@@ -38,20 +36,17 @@ async function download(record: any) {
     const result = await appStore.downloadVersion(record.version, url);
     message.destroy();
     if (result.success) {
-      message.success(`下载成功！`);
+      message.success('下载成功！');
       await refresh();
     } else {
       message.error(`下载失败：${result.error}`);
-      // 如果是 GitHub 地址失败，提示使用镜像
       if (url.includes('github.com') && result.error?.includes('404')) {
         Modal.confirm({
           title: '下载失败',
           content: 'GitHub 下载失败，是否尝试使用镜像源？',
           okText: '使用镜像下载',
           cancelText: '取消',
-          onOk: () => {
-            mirrorsVisible.value = true;
-          }
+          onOk: () => { mirrorsVisible.value = true; }
         });
       }
     }
@@ -82,7 +77,7 @@ async function remove(record: any) {
 async function importLocal() {
   const result = await appStore.importLocalFrpc();
   if (result.success) {
-    message.success(`导入成功！`);
+    message.success('导入成功！');
     await refresh();
   } else if (result.error !== 'canceled') {
     message.error(`导入失败：${result.error}`);
@@ -103,9 +98,9 @@ onMounted(() => { refresh(); });
 </script>
 
 <template>
-  <div class="versions-page">
+  <div class="page-container">
     <div class="page-header">
-      <h2 class="page-title">版本管理</h2>
+      <h1 class="page-title">版本管理</h1>
       <a-space>
         <a-button @click="mirrorsVisible = true">
           <template #icon><GlobalOutlined /></template>
@@ -122,7 +117,7 @@ onMounted(() => { refresh(); });
       </a-space>
     </div>
 
-    <a-card>
+    <a-card class="content-card">
       <a-alert
         v-if="appStore.versions.length === 0 && !loading"
         message="暂无版本数据"
@@ -175,14 +170,13 @@ onMounted(() => { refresh(); });
       </a-table>
     </a-card>
 
-    <!-- 镜像源选择对话框 -->
     <a-modal
       v-model:open="mirrorsVisible"
       title="选择下载镜像源"
       width="500px"
       :footer="null"
     >
-      <p style="margin-bottom: 16px">
+      <p style="margin-bottom: 16px; color: #64748b;">
         如果 GitHub 下载失败，可以选择镜像源加速下载：
       </p>
       <a-radio-group v-model:value="selectedMirror" style="width: 100%">
@@ -191,10 +185,10 @@ onMounted(() => { refresh(); });
             v-for="mirror in appStore.mirrors"
             :key="mirror.id"
             :value="mirror.id"
-            style="display: block; padding: 12px; border: 1px solid #e8e8e8; border-radius: 4px; margin-bottom: 8px;"
+            class="mirror-radio"
           >
             <strong>{{ mirror.name }}</strong>
-            <div v-if="mirror.prefix" style="color: #999; font-size: 12px; margin-top: 4px">
+            <div v-if="mirror.prefix" class="mirror-url">
               {{ mirror.prefix }}
             </div>
           </a-radio>
@@ -211,7 +205,113 @@ onMounted(() => { refresh(); });
 </template>
 
 <style scoped lang="scss">
-.versions-page { padding: 24px; height: calc(100vh - 60px); overflow-y: auto; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-.page-title { font-size: 24px; font-weight: 600; }
+.page-container {
+  padding: 24px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+
+  .page-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+  }
+
+  .ant-btn {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+}
+
+.content-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  :deep(.ant-table) {
+    .ant-table-thead > tr > th {
+      background: #f8fafc;
+      font-weight: 600;
+      color: #475569;
+      border-radius: 6px;
+    }
+
+    .ant-table-tbody > tr:hover > td {
+      background: #f8fafc;
+    }
+  }
+
+  .ant-btn {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+}
+
+.mirror-radio {
+  display: block !important;
+  padding: 12px 16px !important;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: #2563eb;
+    background: #f8fafc;
+  }
+
+  :deep(.ant-radio) {
+    margin-right: 12px;
+  }
+
+  .mirror-url {
+    color: #94a3b8;
+    font-size: 12px;
+    margin-top: 4px;
+    font-family: monospace;
+  }
+}
+
+.ant-modal {
+  .ant-modal-content {
+    border-radius: 12px;
+  }
+
+  .ant-modal-header {
+    border-radius: 12px 12px 0 0;
+    font-weight: 600;
+  }
+
+  .ant-btn-primary {
+    border-radius: 8px;
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+}
 </style>

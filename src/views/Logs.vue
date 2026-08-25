@@ -121,56 +121,138 @@ function getLevelColor(level: string) {
 </template>
 
 <style scoped lang="scss">
-.logs-page { padding: 24px; height: calc(100vh - 60px); overflow-y: auto; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-.page-title { font-size: 24px; font-weight: 600; }
+.logs-page {
+  padding: 24px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+
+  .page-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+  }
+
+  .ant-btn {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    &:active {
+      transform: scale(0.98);
+    }
+  }
+}
 
 .filter-toolbar {
   display: flex;
   align-items: center;
   gap: 16px;
   margin-bottom: 16px;
-  padding: 12px 16px;
-  background: #f5f5f5;
-  border-radius: 4px;
+  padding: 16px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+
+  .ant-input {
+    border-radius: 8px;
+  }
+
+  .ant-radio-group {
+    .ant-radio-button-wrapper {
+      border-radius: 6px;
+      margin-right: 4px;
+      transition: all 0.2s ease;
+
+      &:hover {
+        transform: translateY(-1px);
+      }
+
+      &.ant-radio-button-wrapper-checked {
+        background: #2563eb;
+        border-color: #2563eb;
+      }
+    }
+  }
 }
 
 .log-card {
-  :deep(.ant-card-body) { padding: 0; }
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  :deep(.ant-card-body) {
+    padding: 0;
+  }
 }
 
 .log-console {
-  font-family: 'Consolas', 'Monaco', monospace;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 13px;
-  background-color: #1e1e1e;
-  color: #d4d4d4;
+  background-color: #1e293b;
+  color: #e2e8f0;
   padding: 16px;
-  border-radius: 4px;
+  border-radius: 12px;
   max-height: 500px;
   overflow-y: auto;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: #0f172a;
+    border-radius: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 4px;
+
+    &:hover {
+      background: #64748b;
+    }
+  }
 }
 
 .log-line {
-  padding: 4px 0;
-  border-bottom: 1px solid #2d2d2d;
+  padding: 6px 0;
+  border-bottom: 1px solid #334155;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
+
+  &:last-child {
+    border-bottom: none;
+  }
 }
 
 .log-time {
-  color: #858585;
+  color: #94a3b8;
   white-space: nowrap;
+  font-size: 12px;
 }
 
 .log-level {
-  min-width: 50px;
+  min-width: 55px;
   text-align: center;
+  border-radius: 4px;
+  font-weight: 500;
 }
 
 .log-msg {
-  color: #d4d4d4;
+  color: #e2e8f0;
   flex: 1;
   word-break: break-all;
+  line-height: 1.5;
 }
 </style>
