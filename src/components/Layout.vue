@@ -279,5 +279,33 @@ const handleMenuSelect = ({ key }: { key: string }) => {
 
 .app-content {
   overflow-y: auto;
+  background: linear-gradient(180deg, #f1f5f9 0%, #f8fafc 100%);
+  position: relative;
+  
+  // 顶部装饰条
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #2563eb 0%, #7c3aed 50%, #2563eb 100%);
+    opacity: 0.8;
+  }
+  
+  // 背景网格装饰
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image: 
+      radial-gradient(circle at 20% 30%, rgba(37, 99, 235, 0.03) 0%, transparent 50%),
+      radial-gradient(circle at 80% 70%, rgba(124, 58, 237, 0.03) 0%, transparent 50%);
+    pointer-events: none;
+  }
 }
 </style>
