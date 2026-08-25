@@ -10,38 +10,27 @@ const downloading = ref<string | null>(null);
 const mirrorsVisible = ref(false);
 const selectedMirror = ref('github');
 
-const mirrors = ref<any[]>([]);
-
 const columns = [
-  { title: '版本', dataIndex: 'version', key: 'version', ellipsis: true },
+  { title: '版本', dataIndex: 'version', key: 'version', ellipsis: true, width: 120 },
   { title: '发布日期', dataIndex: 'published_at', key: 'published_at', width: 120,
     customRender: ({ text }: { text: string }) => text ? new Date(text).toLocaleDateString() : '-' },
   { title: '大小', key: 'size', width: 100,
     customRender: ({ record }: { record: any }) => record.size ? (record.size / 1048576).toFixed(1) + ' MB' : '-' },
   { title: '状态', key: 'downloaded', width: 80 },
-  { title: '操作', key: 'action', width: 150, fixed: 'right' as const },
+  { title: '操作', key: 'action', width: 140, fixed: 'right' as const },
 ];
 
 async function refresh() {
   loading.value = true;
   await appStore.loadVersions();
-  await appStore.loadMirrors();
-  mirrors.value = appStore.mirrors;
   loading.value = false;
 }
 
-async function download(record: any, useMirror = false) {
+async function download(record: any) {
   downloading.value = record.version;
   
-  let url = record.download_url;
-  
-  // 如果使用镜像
-  if (useMirror && selectedMirror.value !== 'github') {
-    const mirror = mirrors.value.find((m: any) => m.id === selectedMirror.value);
-    if (mirror && mirror.prefix) {
-      url = mirror.prefix + url;
-    }
-  }
+  // 优先使用镜像 URL
+  let url = record.mirror_url || record.download_url;
   
   message.loading(`正在下载 ${record.version}...`, 0);
   
@@ -101,8 +90,13 @@ async function importLocal() {
 }
 
 function handleMirrorDownload(record: any) {
+  const mirror = appStore.mirrors.find((m: any) => m.id === selectedMirror.value);
+  let url = record.download_url;
+  if (mirror && mirror.prefix) {
+    url = mirror.prefix + url;
+  }
+  download({ ...record, mirror_url: url });
   mirrorsVisible.value = false;
-  download(record, true);
 }
 
 onMounted(() => { refresh(); });
@@ -143,9 +137,9 @@ onMounted(() => { refresh(); });
         :data-source="appStore.versions"
         :columns="columns"
         row-key="version"
-        :pagination="{ pageSize: 10, showSizeChanger: true }"
+        :pagination="{ pageSize: 10, showSizeChanger: true, showQuickJumper: true }"
         :loading="loading"
-        :scroll="{ x: 800 }"
+        :scroll="{ x: 620 }"
         size="middle"
       >
         <template #bodyCell="{ column, record }">
@@ -194,7 +188,7 @@ onMounted(() => { refresh(); });
       <a-radio-group v-model:value="selectedMirror" style="width: 100%">
         <a-space direction="vertical" style="width: 100%">
           <a-radio
-            v-for="mirror in mirrors"
+            v-for="mirror in appStore.mirrors"
             :key="mirror.id"
             :value="mirror.id"
             style="display: block; padding: 12px; border: 1px solid #e8e8e8; border-radius: 4px; margin-bottom: 8px;"

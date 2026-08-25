@@ -45,8 +45,11 @@ const columns = [
   { title: '操作', key: 'action', width: 220, fixed: 'right' as const },
 ];
 
+const editingName = ref<string | null>(null);
+
 function openAdd() {
   modalVisible.value = true;
+  editingName.value = null;
   form.value = {
     name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 8080,
     remote_port: 8080, enabled: true, bandwidth_limit: '', traffic_limit: 0,
@@ -61,13 +64,19 @@ function openAdd() {
 
 function openEdit(proxy: any) {
   modalVisible.value = true;
+  editingName.value = proxy.name;
   form.value = { ...proxy };
 }
 
 function handleSave() {
   if (!form.value.name) { message.warning('请输入代理名称'); return; }
-  appStore.addProxy(form.value);
-  message.success('保存成功');
+  if (editingName.value) {
+    appStore.updateProxy(editingName.value, form.value);
+    message.success('保存成功');
+  } else {
+    appStore.addProxy(form.value);
+    message.success('添加成功');
+  }
   modalVisible.value = false;
 }
 

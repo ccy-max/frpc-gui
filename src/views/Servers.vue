@@ -23,17 +23,17 @@ const filteredServers = computed(() => {
 });
 
 const columns = [
-  { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true },
-  { title: '服务器地址', dataIndex: 'serverAddr', key: 'serverAddr', ellipsis: true },
+  { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true, width: 150 },
+  { title: '服务器地址', dataIndex: 'serverAddr', key: 'serverAddr', ellipsis: true, width: 180 },
   { title: '端口', dataIndex: 'serverPort', key: 'serverPort', width: 80 },
   { title: 'TLS', key: 'tlsEnable', width: 60 },
-  { title: '启用', key: 'enabled', width: 80 },
-  { title: '操作', key: 'action', width: 180, fixed: 'right' as const },
+  { title: '启用', key: 'enabled', width: 70 },
+  { title: '操作', key: 'action', width: 140, fixed: 'right' as const },
 ];
 
 function openAdd() {
   editingId.value = null;
-  form.value = { id: '', name: '', serverAddr: '', serverPort: 7000, token: '', tlsEnable: false, enabled: true };
+  form.value = { id: Date.now().toString(), name: '', serverAddr: '', serverPort: 7000, token: '', tlsEnable: false, enabled: true };
   modalVisible.value = true;
 }
 
@@ -52,7 +52,6 @@ function handleSave() {
     appStore.updateServer(editingId.value, form.value);
     message.success('保存成功');
   } else {
-    form.value.id = Date.now().toString();
     appStore.addServer(form.value);
     message.success('添加成功');
   }
@@ -83,24 +82,20 @@ function handleDelete(server: any) {
     </a-page-header>
 
     <a-card :bordered="false">
-      <!-- 搜索栏 -->
-      <div class="search-bar" style="margin-bottom: 16px">
-        <a-input
-          v-model:value="searchKeyword"
-          placeholder="搜索服务器名称或地址"
-          style="width: 300px"
-          allow-clear
-        />
-      </div>
+      <a-input
+        v-model:value="searchKeyword"
+        placeholder="搜索服务器名称或地址"
+        style="width: 300px; margin-bottom: 16px"
+        allow-clear
+      />
 
-      <!-- 表格 -->
       <a-table
         :data-source="filteredServers"
         :columns="columns"
         row-key="id"
-        :pagination="{ pageSize: 10, showSizeChanger: true }"
-        :scroll="{ x: 1000 }"
-        :locale="{ emptyText: ' ' }"
+        :pagination="{ pageSize: 10, showSizeChanger: true, showQuickJumper: true }"
+        :scroll="{ x: 780 }"
+        size="middle"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'tlsEnable'">
@@ -125,7 +120,6 @@ function handleDelete(server: any) {
       <a-empty v-if="filteredServers.length === 0" description="暂无服务器配置" style="margin-top: 48px" />
     </a-card>
 
-    <!-- 编辑对话框 -->
     <a-modal
       v-model:open="modalVisible"
       :title="editingId ? '编辑服务器' : '添加服务器'"
@@ -159,11 +153,5 @@ function handleDelete(server: any) {
 <style scoped>
 .page-container {
   padding: 24px;
-}
-
-.search-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 </style>
