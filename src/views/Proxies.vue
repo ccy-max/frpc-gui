@@ -154,8 +154,6 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
           </template>
         </template>
       </a-table>
-
-      <a-empty v-if="filteredProxies.length === 0" description="暂无代理配置" style="margin-top: 48px" />
     </a-card>
 
     <a-modal
