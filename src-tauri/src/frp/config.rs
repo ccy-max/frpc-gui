@@ -353,6 +353,70 @@ impl ConfigManager {
         Ok(())
     }
 
+    /// 生成 INI 格式配置（frp v0.52.0 之前旧版 frpc 使用）
+    ///
+    /// 旧版 INI 结构：
+    ///   [common] 服务器连接 + 认证 + 日志
+    ///   [proxy_name] 每个代理一段
+    pub fn generate_ini(&self, config: &FrpConfig, log_file_path: &str) -> Result<String> {
+        let mut ini = String::new();
+
+        // [common] 段（旧版所有顶层配置都在这里）
+        ini.push_str("[common]\n");
+        ini.push_str(&format!("server_addr = {}\n", config.server_addr));
+        ini.push_str(&format!("server_port = {}\n", config.server_port));
+        if let Some(ref user) = config.user {
+            if !user.is_empty() {
+                ini.push_str(&format!("user = {}\n", user));
+            }
+        }
+        // 认证（旧版 INI 无 method 概念，有 token 就写）
+        if let Some(ref token) = config.auth.token {
+            if !token.is_empty() {
+                ini.push_str(&format!("token = {}\n", token));
+            }
+        }
+        if config.tls.enable {
+            ini.push_str("tls_enable = true\n");
+        }
+        if let Some(v) = config.login_fail_exit {
+            ini.push_str(&format!("login_fail_exit = {}\n", v));
+        }
+
+        // 日志（INI 值不加引号，反斜杠无转义问题，但统一正斜杠保持一致）
+        let log_path_normalized = log_file_path.replace('\\', "/");
+        ini.push_str(&format!("\n[log]\nto = {}\n", log_path_normalized));
+        ini.push_str(&format!("level = {}\n", config.log.level));
+        ini.push_str(&format!("max_days = {}\n", config.log.max_days));
+
+        // 启用的普通代理
+        let enabled_proxies: Vec<&ProxyConfig> = config.proxies.iter()
+            .filter(|p| p.enabled)
+            .filter(|p| !Self::is_range_port(p))
+            .filter(|p| !Self::is_visitor(p))
+            .collect();
+
+        for proxy in enabled_proxies {
+            ini.push_str(&format!("\n[{}]\n", proxy.name));
+            ini.push_str(&format!("type = {}\n", proxy.proxy_type));
+            if let Some(ref v) = proxy.local_ip { ini.push_str(&format!("local_ip = {}\n", v)); }
+            if let Some(ref v) = proxy.local_port { ini.push_str(&format!("local_port = {}\n", v)); }
+            if let Some(ref v) = proxy.remote_port { ini.push_str(&format!("remote_port = {}\n", v)); }
+            if let Some(ref v) = proxy.custom_domains {
+                if !v.is_empty() {
+                    ini.push_str(&format!("custom_domains = {}\n", v.join(",")));
+                }
+            }
+            if let Some(ref v) = proxy.subdomain {
+                if !v.is_empty() { ini.push_str(&format!("subdomain = {}\n", v)); }
+            }
+            if proxy.use_encryption == Some(true) { ini.push_str("use_encryption = true\n"); }
+            if proxy.use_compression == Some(true) { ini.push_str("use_compression = true\n"); }
+        }
+
+        Ok(ini)
+    }
+
     /// 生成 frpc 可识别的 TOML 配置文件
     ///
     /// 关键逻辑：
@@ -993,5 +1057,52 @@ mod regression_tests {
         let result: Result<FrpConfig, _> = serde_json::from_str(json);
         assert!(result.is_err(), "缺必填字段必须报错");
         assert!(result.unwrap_err().to_string().contains("server_addr"));
+    }
+}
+
+#[cfg(test)]
+mod ini_tests {
+    //! 旧版 frpc（INI 格式）兼容回归测试
+    use super::*;
+
+    #[test]
+    fn test_generate_ini_basic() {
+        let mut config = FrpConfig::default();
+        config.server_addr = "192.168.1.100".to_string();
+        config.auth.token = Some("mytoken".to_string());
+        config.proxies.push(ProxyConfig {
+            name: "web".to_string(),
+            proxy_type: "tcp".to_string(),
+            local_ip: Some("127.0.0.1".to_string()),
+            local_port: Some("8080".to_string()),
+            remote_port: Some("8080".to_string()),
+            enabled: true,
+            ..Default::default()
+        });
+
+        let cm = ConfigManager::new(PathBuf::from("/tmp/x.json"));
+        let ini = cm.generate_ini(&config, "C:/logs/frpc.log").unwrap();
+
+        assert!(ini.contains("[common]"), "INI 必须有 [common] 段");
+        assert!(ini.contains("server_addr = 192.168.1.100"));
+        assert!(ini.contains("token = mytoken"));
+        assert!(ini.contains("[web]"), "启用的代理必须有独立段");
+        assert!(ini.contains("local_port = 8080"));
+        // 未启用的代理不应出现
+        assert!(!ini.contains("[disabled]"));
+    }
+
+    #[test]
+    fn test_version_detection() {
+        // 模拟版本解析逻辑：>= 0.52 支持 TOML
+        let parse = |v: &str| -> (u32, u32) {
+            let v = v.trim_start_matches('v');
+            let parts: Vec<u32> = v.split('.').map(|s| s.parse().unwrap_or(0)).collect();
+            (parts.first().copied().unwrap_or(0), parts.get(1).copied().unwrap_or(0))
+        };
+        assert!(parse("0.52.0") >= (0, 52), "0.52.0 应支持 TOML");
+        assert!(parse("0.61.0") >= (0, 52));
+        assert!(parse("v0.33.0") < (0, 52), "0.33.0 是 INI 时代");
+        assert!(parse("0.51.3") < (0, 52));
     }
 }

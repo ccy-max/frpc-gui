@@ -119,16 +119,31 @@ impl FrpProcessManager {
         info!("Starting FRP process: {:?}", self.frpc_path);
         self.running.store(true, Ordering::SeqCst);
 
-        // 生成 frpc.toml 配置文件（使用 generate_toml 排除 UI 字段）
+        // 生成配置文件：按 frpc 版本自动选择格式
+        // - frp >= 0.52.0 → TOML（新版格式，serverAddr = "..."）
+        // - frp <  0.52.0 → INI（旧版格式，[common] 段）
+        // 历史 bug：旧版 frpc 读 TOML 报
+        //   "invalid configuration file, not found [common] section"
         let cm = ConfigManager::new(self.config_path.clone());
-        let toml_content = cm.generate_toml(config, self.log_file_path.to_string_lossy().as_ref())?;
-        std::fs::write(&self.config_path, toml_content)
-            .with_context(|| "写入 frpc.toml 失败")?;
+        let use_toml = Self::frpc_supports_toml(&self.frpc_path);
+        let config_file = if use_toml {
+            let toml_content = cm.generate_toml(config, self.log_file_path.to_string_lossy().as_ref())?;
+            std::fs::write(&self.config_path, toml_content)
+                .with_context(|| "写入 frpc.toml 失败")?;
+            self.config_path.clone()
+        } else {
+            info!("frpc 为旧版本，使用 INI 格式配置");
+            let ini_path = self.config_path.with_extension("ini");
+            let ini_content = cm.generate_ini(config, self.log_file_path.to_string_lossy().as_ref())?;
+            std::fs::write(&ini_path, ini_content)
+                .with_context(|| "写入 frpc.ini 失败")?;
+            ini_path
+        };
 
         // 启动进程
         let mut cmd = Command::new(&self.frpc_path);
         cmd.arg("-c")
-            .arg(&self.config_path)
+            .arg(&config_file)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
@@ -581,4 +596,32 @@ pub fn get_frpc_version(path: &Path) -> Result<String> {
         .with_context(|| "执行 frpc -v 失败")?;
     let version = String::from_utf8_lossy(&output.stdout);
     Ok(version.trim().to_string())
+}
+
+impl FrpProcessManager {
+    /// 检测指定 frpc 是否支持 TOML 配置格式
+    ///
+    /// frp v0.52.0 起引入 TOML/YAML/JSON 并弃用 INI；
+    /// 更早版本只认 INI（[common] 段），读 TOML 会报
+    /// "invalid configuration file, not found [common] section"。
+    ///
+    /// 版本获取失败时保守返回 true（假定新版，走 TOML）。
+    pub fn frpc_supports_toml(frpc_path: &Path) -> bool {
+        match get_frpc_version(frpc_path) {
+            Ok(ver) => {
+                let v = ver.trim().trim_start_matches('v');
+                let parts: Vec<u32> = v.split('.')
+                    .map(|s| s.trim().parse::<u32>().unwrap_or(0))
+                    .collect();
+                let supports = parts.first().copied().unwrap_or(0) > 0
+                    || parts.get(1).copied().unwrap_or(0) >= 52;
+                info!("frpc version {}: toml_support={}", ver, supports);
+                supports
+            }
+            Err(e) => {
+                warn!("获取 frpc 版本失败({})，假定支持 TOML", e);
+                true
+            }
+        }
+    }
 }
