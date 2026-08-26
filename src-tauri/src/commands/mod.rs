@@ -1025,6 +1025,7 @@ pub async fn get_server_status(
                 state: state_str,
                 proxy_count: 0, // 前端会填充
                 error: None,
+                last_start_time: pm.get_started_at(),
             })
         }
         None => {
@@ -1036,6 +1037,7 @@ pub async fn get_server_status(
                 state: "not_started".to_string(),
                 proxy_count: 0,
                 error: None,
+                last_start_time: None,
             })
         }
     }
@@ -1067,6 +1069,15 @@ pub async fn get_all_servers_status(
             state: state_str,
             proxy_count: 0,
             error: None,
+            last_start_time: {
+                match state.process_managers.try_lock() {
+                    Ok(g) => match g.get(server_id.as_str()) {
+                        Some(m) => m.get_started_at(),
+                        None => None,
+                    },
+                    Err(_) => None,
+                }
+            },
         });
     }
     
@@ -1364,6 +1375,9 @@ pub struct ServerStatusResponse {
     pub state: String,
     pub proxy_count: usize,
     pub error: Option<String>,
+    /// 进程启动时刻（Unix 秒级时间戳；运行时长以此为准）
+    #[serde(default)]
+    pub last_start_time: Option<i64>,
 }
 
 /// 代理状态信息

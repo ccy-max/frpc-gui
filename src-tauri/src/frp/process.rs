@@ -116,6 +116,15 @@ impl FrpProcessManager {
             return Err(anyhow::anyhow!("FRP 进程已在运行中 (PID: {})", self.pid()));
         }
 
+        // 启动前清场：杀掉本服务器配置下的孤儿 frpc 进程
+        // 历史 bug：应用重启/停止失败残留的孤儿进程与新实例叠加，
+        // 旧进程用旧配置持续运行（连错端口、刷旧日志），用户误以为配置不生效
+        if self.is_any_orphan_alive() {
+            let n = self.kill_orphans();
+            warn!("Cleaned {} orphan frpc process(es) before start", n);
+            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        }
+
         info!("Starting FRP process: {:?}", self.frpc_path);
         self.running.store(true, Ordering::SeqCst);
 
@@ -158,6 +167,7 @@ impl FrpProcessManager {
                 info!("FRP process started with PID: {}", pid);
 
                 self.pid.store(pid, Ordering::SeqCst);
+                self.save_pid(pid); // 持久化 PID（应用重启后 stop 仍能找到进程）
                 *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner()) = chrono::Local::now().timestamp();
 
                 // 提取 stdout/stderr
@@ -216,43 +226,160 @@ impl FrpProcessManager {
     }
 
     /// 停止 FRP 进程
-    pub async fn stop(&mut self) -> Result<()> {
-        if !self.is_process_alive() {
-            self.reset_state();
-            return Ok(());
-        }
+    /// PID 记录文件路径（servers/{id}/frpc.pid）
+    ///
+    /// 历史 bug：应用重启后 process manager 重建（内存 pid=0），
+    /// stop 时 is_process_alive()=false 直接假装停止成功，
+    /// 孤儿 frpc 进程永远无人处理（用户任务管理器可见 frpc.exe 残留）。
+    fn pid_file(&self) -> PathBuf {
+        self.config_path.parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("frpc.pid")
+    }
 
-        info!("Stopping FRP process, PID: {}", self.pid());
-        let pid = self.pid();
+    /// 持久化 PID（spawn 成功后调用）
+    fn save_pid(&self, pid: u32) {
+        if let Some(dir) = self.pid_file().parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(self.pid_file(), pid.to_string());
+    }
+
+    /// 读取持久化的 PID
+    fn load_pid(&self) -> Option<u32> {
+        std::fs::read_to_string(self.pid_file()).ok()?
+            .trim().parse::<u32>().ok().filter(|p| *p > 0)
+    }
+
+    /// 删除 PID 记录文件
+    fn clear_pid_file(&self) {
+        let _ = std::fs::remove_file(self.pid_file());
+    }
+
+    /// 按配置路径查找孤儿 frpc 进程 PID
+    ///
+    /// 精准匹配命令行中包含本服务器配置目录路径的 frpc 进程，
+    /// 不会误杀其他实例或其他程序的 frpc。
+    fn find_orphan_pids_by_config(&self) -> Vec<u32> {
+        let dir_marker = self.config_path.parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if dir_marker.is_empty() {
+            return vec![];
+        }
 
         #[cfg(windows)]
         {
-            Command::new("taskkill")
-                .args(["/F", "/T", "/PID"])
-                .arg(pid.to_string())
+            // PowerShell 按命令行过滤（frpc.exe 且命令行含配置目录）
+            let ps_script = format!(
+                "Get-CimInstance Win32_Process -Filter \"Name='frpc.exe'\" | \
+                 Where-Object {{ $_.CommandLine -like '*{}*' }} | \
+                 Select-Object -ExpandProperty ProcessId",
+                dir_marker.replace('\'', "''")
+            );
+            if let Ok(output) = Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
                 .creation_flags(0x08000000)
                 .output()
-                .ok();
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                return stdout.lines()
+                    .filter_map(|l| l.trim().parse::<u32>().ok())
+                    .collect();
+            }
+            vec![]
         }
 
         #[cfg(unix)]
         {
-            // 先 SIGTERM，再 SIGKILL
-            Command::new("kill")
-                .arg("-TERM")
-                .arg(pid.to_string())
+            if let Ok(output) = Command::new("pgrep")
+                .args(["-f", &format!("frpc.*{}", dir_marker)])
                 .output()
-                .ok();
-            
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            
-            if self.is_process_alive() {
-                Command::new("kill")
-                    .arg("-KILL")
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                return stdout.lines()
+                    .filter_map(|l| l.trim().parse::<u32>().ok())
+                    .collect();
+            }
+            vec![]
+        }
+    }
+
+    /// 强杀指定 PID（含进程树）
+    fn kill_pid_tree(pid: u32) {
+        #[cfg(windows)]
+        {
+            let _ = Command::new("taskkill")
+                .args(["/F", "/T", "/PID"])
+                .arg(pid.to_string())
+                .creation_flags(0x08000000)
+                .output();
+        }
+        #[cfg(unix)]
+        {
+            let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).output();
+        }
+    }
+
+    /// 清理本服务器配置目录下的所有孤儿 frpc 进程
+    ///
+    /// 返回杀掉的 PID 数量。start 前调用防止多实例叠加；
+    /// stop 时兜底（应用重启后内存句柄丢失场景）。
+    fn kill_orphans(&self) -> usize {
+        let pids = self.find_orphan_pids_by_config();
+        let count = pids.len();
+        for pid in pids {
+            info!("Killing orphan frpc process, PID: {}", pid);
+            Self::kill_pid_tree(pid);
+        }
+        if count > 0 {
+            // 等待进程退出
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+        count
+    }
+
+    pub async fn stop(&mut self) -> Result<()> {
+        let mut pid = self.pid();
+
+        // PID 为 0 时从 PID 文件恢复（应用重启后 manager 重建场景）
+        if pid == 0 {
+            pid = self.load_pid().unwrap_or(0);
+        }
+
+        if pid != 0 && self.is_process_alive_by_pid(pid) {
+            info!("Stopping FRP process, PID: {}", pid);
+
+            #[cfg(windows)]
+            {
+                Command::new("taskkill")
+                    .args(["/F", "/T", "/PID"])
                     .arg(pid.to_string())
+                    .creation_flags(0x08000000)
                     .output()
                     .ok();
             }
+
+            #[cfg(unix)]
+            {
+                Command::new("kill").arg("-TERM").arg(pid.to_string()).output().ok();
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                if self.is_process_alive_by_pid(pid) {
+                    Command::new("kill").arg("-KILL").arg(pid.to_string()).output().ok();
+                }
+            }
+
+            // 验证进程确实死亡（此前杀完不验证，失败也假装成功）
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if self.is_process_alive_by_pid(pid) {
+                warn!("PID {} still alive after taskkill, forcing orphan cleanup", pid);
+                self.kill_orphans();
+            }
+        } else if self.is_any_orphan_alive() {
+            // 内存与 PID 文件都无有效进程，但存在同配置的孤儿进程
+            // （应用重启后旧 frpc 仍在跑的场景——用户截图实锤）
+            info!("No tracked PID but orphan frpc detected, cleaning up");
+            self.kill_orphans();
         }
 
         // 关闭子进程句柄
@@ -261,9 +388,47 @@ impl FrpProcessManager {
             child.wait().ok();
         }
 
+        self.clear_pid_file();
         self.reset_state();
         info!("FRP process stopped");
         Ok(())
+    }
+
+    /// 检查是否存在本配置下的存活 frpc 进程（孤儿检测）
+    fn is_any_orphan_alive(&self) -> bool {
+        !self.find_orphan_pids_by_config().is_empty()
+    }
+
+    /// 按 PID 检查进程存活（不依赖内存句柄）
+    fn is_process_alive_by_pid(&self, pid: u32) -> bool {
+        if pid == 0 {
+            return false;
+        }
+
+        #[cfg(windows)]
+        {
+            // tasklist 精确匹配 PID
+            if let Ok(output) = Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {}", pid)])
+                .creation_flags(0x08000000)
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                return stdout.to_lowercase().contains("frpc.exe");
+            }
+            false
+        }
+
+        #[cfg(unix)]
+        {
+            use std::process::Command as StdCommand;
+            StdCommand::new("kill")
+                .arg("-0")
+                .arg(pid.to_string())
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }
     }
 
     /// 重启 FRP 进程
@@ -452,6 +617,12 @@ impl FrpProcessManager {
     // ==================== 状态获取 ====================
 
     /// 获取进程状态
+    /// 获取进程启动时刻（Unix 秒级时间戳；未运行返回 None）
+    pub fn get_started_at(&self) -> Option<i64> {
+        let t = *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner());
+        if t > 0 { Some(t) } else { None }
+    }
+
     pub fn get_state(&self) -> ProcessState {
         if self.is_process_alive() {
             ProcessState::Running { pid: self.pid() }

@@ -1,17 +1,65 @@
 <script setup lang="ts">
+/**
+ * 概览页
+ *
+ * 运行时长：基于全局 store 的 frpcStartedAt（后端权威时间戳同步），切页不重置
+ * 实时日志：缓冲在全局 store.liveLogs，切页保留；挂载时若为空从磁盘日志预填
+ */
 import { computed, ref, onMounted, onUnmounted, nextTick, h } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter } from 'vue-router';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   PlusOutlined, PlayCircleOutlined, PauseCircleOutlined,
-  CheckCircleOutlined, ClockCircleOutlined,
-  CloudServerOutlined, ThunderboltOutlined,
-  FileTextOutlined, SettingOutlined
+  FileTextOutlined, SettingOutlined, ReloadOutlined,
 } from '@ant-design/icons-vue';
+import { message } from 'ant-design-vue';
 
 const appStore = useAppStore();
 const router = useRouter();
+
+const autoScroll = ref(true);
+const logTerminalRef = ref<HTMLElement | null>(null);
+let unlistenLog: UnlistenFn | null = null;
+
+const MAX_LOG_LINES = 500;
+
+const stats = computed(() => [
+  {
+    title: '运行状态',
+    value: appStore.isRunning ? '运行中' : '已停止',
+    icon: appStore.isRunning ? PlayCircleOutlined : PauseCircleOutlined,
+    color: appStore.isRunning ? '#52c41a' : '#8c8c8c',
+  },
+  {
+    title: '运行时长',
+    value: formatUptime(uptimeSeconds.value),
+    icon: ReloadOutlined,
+    color: '#1890ff',
+  },
+  {
+    title: '代理总数',
+    value: String(appStore.proxies.length),
+    icon: FileTextOutlined,
+    color: '#722ed1',
+  },
+  {
+    title: '活跃代理',
+    value: String(appStore.activeProxiesCount),
+    icon: ReloadOutlined,
+    color: '#faad14',
+  },
+]);
+
+function formatUptime(totalSeconds: number): string {
+  if (totalSeconds <= 0) return '0秒';
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) return `${h}时${m}分`;
+  if (m > 0) return `${m}分${s}秒`;
+  return `${s}秒`;
+}
 
 const uptimeSeconds = ref(0);
 let uptimeTimer: ReturnType<typeof setInterval> | null = null;
@@ -27,87 +75,7 @@ function tickUptime() {
   }
 }
 
-const stats = computed(() => [
-  {
-    title: '运行状态',
-    value: appStore.isRunning ? '运行中' : '已停止',
-    prefix: () => h(CheckCircleOutlined),
-    valueStyle: { color: appStore.isRunning ? '#10b981' : '#64748b' }
-  },
-  {
-    title: '运行时长',
-    value: formatUptime(uptimeSeconds.value),
-    prefix: () => h(ClockCircleOutlined),
-    valueStyle: { color: '#2563eb' }
-  },
-  {
-    title: '代理总数',
-    value: appStore.proxies.length,
-    prefix: () => h(CloudServerOutlined),
-    valueStyle: { color: '#7c3aed' }
-  },
-  {
-    title: '活跃代理',
-    value: appStore.activeProxiesCount,
-    prefix: () => h(ThunderboltOutlined),
-    valueStyle: { color: '#f59e0b' }
-  },
-]);
-
-function formatUptime(seconds: number): string {
-  if (seconds < 60) return `${seconds}秒`;
-  if (seconds < 3600) {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}分${s}秒`;
-  }
-  if (seconds < 86400) {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    return `${h}时${m}分`;
-  }
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  return `${d}天${h}时`;
-}
-
-// ==================== 实时日志（frpc 运行时日志） ====================
-interface LiveLogLine {
-  ts: string;      // 格式化时间 HH:MM:SS
-  line: string;    // 日志原文（含 [serverId] 前缀）
-  isError: boolean;
-}
-
-const liveLogs = ref<LiveLogLine[]>([]);
-const autoScroll = ref(true);
-const logTerminalRef = ref<HTMLElement | null>(null);
-const MAX_LOG_LINES = 500;
-let unlistenLog: UnlistenFn | null = null;
-
-function fmtTime(ms: number): string {
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-
-function appendLiveLog(line: string, timestamp: number) {
-  liveLogs.value.push({
-    ts: fmtTime(timestamp),
-    line,
-    isError: /ERR|error|失败|failed/i.test(line),
-  });
-  // 环形上限，防止长时间运行内存膨胀
-  if (liveLogs.value.length > MAX_LOG_LINES) {
-    liveLogs.value.splice(0, liveLogs.value.length - MAX_LOG_LINES);
-  }
-  // 自动滚动到底部（用户可手动上滚关闭自动跟随）
-  if (autoScroll.value) {
-    nextTick(() => {
-      const el = logTerminalRef.value;
-      if (el) el.scrollTop = el.scrollHeight;
-    });
-  }
-}
+const recentLogs = computed(() => appStore.liveLogs);
 
 function onTerminalScroll() {
   const el = logTerminalRef.value;
@@ -117,7 +85,7 @@ function onTerminalScroll() {
 }
 
 function clearLiveLogs() {
-  liveLogs.value = [];
+  appStore.clearLiveLogs();
 }
 
 onMounted(async () => {
@@ -125,10 +93,18 @@ onMounted(async () => {
   tickUptime();
   uptimeTimer = setInterval(tickUptime, 1000);
 
+  // 实时日志缓冲为空时，从磁盘日志预填最近内容（切页/重启后不丢上下文）
+  appStore.loadRecentLogsFromDisk();
+
   // 订阅后端 frpc 实时日志事件
   try {
     unlistenLog = await listen<{ line: string; timestamp: number }>('frpc-log', (event) => {
-      appendLiveLog(event.payload.line, event.payload.timestamp);
+      appStore.appendLiveLog(event.payload.line, event.payload.timestamp);
+      nextTick(() => {
+        if (autoScroll.value && logTerminalRef.value) {
+          logTerminalRef.value.scrollTop = logTerminalRef.value.scrollHeight;
+        }
+      });
     });
   } catch (e) {
     console.error('订阅实时日志失败:', e);
@@ -139,41 +115,61 @@ onUnmounted(() => {
   if (uptimeTimer) clearInterval(uptimeTimer);
   if (unlistenLog) unlistenLog();
 });
+
+async function startFrp() {
+  try {
+    const defaultServer = appStore.servers[0];
+    if (!defaultServer) {
+      message.warning('请先添加服务器');
+      return;
+    }
+    await appStore.startServer(defaultServer.id);
+    message.success('FRP 启动指令已发送');
+  } catch (e) {
+    message.error(`启动失败: ${String(e)}`);
+  }
+}
+
+async function stopFrp() {
+  try {
+    const defaultServer = appStore.servers[0];
+    if (!defaultServer) return;
+    await appStore.stopServer(defaultServer.id);
+    message.success('FRP 已停止');
+  } catch (e) {
+    message.error(`停止失败: ${String(e)}`);
+  }
+}
 </script>
 
 <template>
   <div class="dashboard-container">
-    <div class="page-header">
-      <h1 class="page-title">概览</h1>
+    <h1 class="page-title">概览</h1>
+
+    <!-- 统计卡片 -->
+    <div class="stats-grid">
+      <div v-for="stat in stats" :key="stat.title" class="stat-card">
+        <div class="stat-title">{{ stat.title }}</div>
+        <div class="stat-value" :style="{ color: stat.color }">
+          <component :is="stat.icon" class="stat-icon" />
+          {{ stat.value }}
+        </div>
+      </div>
     </div>
 
-    <a-row :gutter="[16, 16]" style="margin-bottom: 24px">
-      <a-col :xs="24" :sm="12" :lg="6" v-for="(stat, index) in stats" :key="index">
-        <a-card :bordered="false" class="stat-card">
-          <a-statistic
-            :title="stat.title"
-            :value="stat.value"
-            :value-style="stat.valueStyle"
-          >
-            <template #prefix>
-              <component :is="stat.prefix" />
-            </template>
-          </a-statistic>
-        </a-card>
-      </a-col>
-    </a-row>
-
-    <a-card title="快速操作" class="action-card" style="margin-bottom: 24px">
+    <!-- 快速操作 -->
+    <a-card class="quick-actions-card" :bordered="false">
+      <template #title>快速操作</template>
       <a-space wrap>
         <a-button type="primary" @click="router.push('/servers')">
           <template #icon><PlusOutlined /></template>
           添加服务器
         </a-button>
-        <a-button type="primary" @click="appStore.startFRP()" :disabled="appStore.isRunning">
+        <a-button type="primary" :disabled="appStore.isRunning" :loading="false" @click="startFrp">
           <template #icon><PlayCircleOutlined /></template>
           启动 FRP
         </a-button>
-        <a-button danger ghost @click="appStore.stopFRP()" :disabled="!appStore.isRunning">
+        <a-button danger :disabled="!appStore.isRunning" @click="stopFrp">
           <template #icon><PauseCircleOutlined /></template>
           停止 FRP
         </a-button>
@@ -188,33 +184,23 @@ onUnmounted(() => {
       </a-space>
     </a-card>
 
-    <!-- frpc 运行时实时日志终端 -->
-    <a-card class="logs-card">
+    <!-- 实时日志 -->
+    <a-card class="logs-card" :bordered="false">
       <template #title>
-        <span>实时日志</span>
-        <a-tag v-if="!autoScroll" color="orange" style="margin-left: 8px">已暂停跟随</a-tag>
+        <div class="logs-header">
+          <span>实时日志</span>
+          <div class="logs-actions">
+            <a-checkbox v-model:checked="autoScroll">自动滚动</a-checkbox>
+            <a-button size="small" @click="clearLiveLogs">清空</a-button>
+            <a-button type="link" size="small" @click="router.push('/logs')">查看全部</a-button>
+          </div>
+        </div>
       </template>
-      <template #extra>
-        <a-space>
-          <a-checkbox v-model:checked="autoScroll" size="small">自动滚动</a-checkbox>
-          <a-button size="small" @click="clearLiveLogs">清空</a-button>
-          <a-button type="link" size="small" @click="router.push('/logs')">查看全部</a-button>
-        </a-space>
-      </template>
-      <div
-        ref="logTerminalRef"
-        class="log-terminal"
-        @scroll="onTerminalScroll"
-      >
-        <div v-if="liveLogs.length === 0" class="log-empty">
+      <div ref="logTerminalRef" class="log-terminal" @scroll="onTerminalScroll">
+        <div v-if="recentLogs.length === 0" class="log-empty">
           暂无运行日志 —— 启动 FRP 后此处将实时显示 frpc 输出
         </div>
-        <div
-          v-for="(log, i) in liveLogs"
-          :key="i"
-          class="log-line"
-          :class="{ 'log-error': log.isError }"
-        >
+        <div v-for="(log, idx) in recentLogs" :key="idx" class="log-line" :class="{ 'log-error': log.isError }">
           <span class="log-ts">{{ log.ts }}</span>
           <span class="log-text">{{ log.line }}</span>
         </div>
@@ -223,135 +209,24 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped lang="scss">
-.dashboard-container {
-  padding: 24px;
+<style scoped>
+.dashboard-container { padding: 4px 8px; }
+.page-title { font-size: 22px; font-weight: 600; margin-bottom: 16px; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px; }
+.stat-card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+.stat-title { font-size: 13px; color: #8c8c8c; margin-bottom: 10px; }
+.stat-value { font-size: 24px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.stat-icon { font-size: 22px; }
+.quick-actions-card, .logs-card { border-radius: 8px; margin-bottom: 16px; }
+.logs-header { display: flex; align-items: center; justify-content: space-between; }
+.logs-actions { display: flex; align-items: center; gap: 8px; }
+.log-terminal {
+  background: #0d1117; color: #c9d1d9; border-radius: 6px;
+  padding: 12px; height: 320px; overflow-y: auto;
+  font-family: 'Consolas', 'Monaco', monospace; font-size: 12px;
 }
-
-.page-header {
-  margin-bottom: 24px;
-
-  .page-title {
-    font-size: 24px;
-    font-weight: 700;
-    color: #1e293b;
-    margin: 0;
-  }
-}
-
-.stat-card {
-  background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: all 0.2s ease;
-
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-  }
-
-  :deep(.ant-statistic-title) {
-    font-size: 14px;
-    color: #64748b;
-    font-weight: 500;
-  }
-
-  :deep(.ant-statistic-content) {
-    font-size: 28px;
-    font-weight: 700;
-  }
-
-  :deep(.ant-statistic .anticon) {
-    font-size: 20px;
-  }
-}
-
-.action-card {
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-
-  :deep(.ant-card-head) {
-    font-weight: 600;
-    font-size: 16px;
-    color: #1e293b;
-  }
-
-  .ant-btn {
-    border-radius: 8px;
-    font-weight: 500;
-    transition: all 0.2s ease;
-
-    &:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-    }
-
-    &:active {
-      transform: scale(0.98);
-    }
-  }
-}
-
-.logs-card {
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-
-  :deep(.ant-card-head) {
-    font-weight: 600;
-    font-size: 16px;
-    color: #1e293b;
-  }
-
-  // 终端风格实时日志
-  .log-terminal {
-    background: #0f172a;
-    border-radius: 8px;
-    padding: 12px 16px;
-    height: 360px;
-    overflow-y: auto;
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    font-size: 12.5px;
-    line-height: 1.7;
-
-    .log-empty {
-      color: #475569;
-      text-align: center;
-      padding-top: 150px;
-      user-select: none;
-    }
-
-    .log-line {
-      white-space: pre-wrap;
-      word-break: break-all;
-      color: #cbd5e1;
-
-      .log-ts {
-        color: #64748b;
-        margin-right: 10px;
-        user-select: none;
-      }
-
-      &.log-error {
-        color: #f87171;
-
-        .log-ts { color: #b91c1c; }
-      }
-
-      &:hover {
-        background: rgba(255, 255, 255, 0.04);
-      }
-    }
-
-    &::-webkit-scrollbar {
-      width: 8px;
-    }
-    &::-webkit-scrollbar-thumb {
-      background: #334155;
-      border-radius: 4px;
-    }
-    &::-webkit-scrollbar-track {
-      background: transparent;
-    }
-  }
-}
+.log-empty { color: #6e7681; text-align: center; margin-top: 140px; }
+.log-line { padding: 1px 0; word-break: break-all; }
+.log-error .log-text { color: #ff7b72; }
+.log-ts { color: #6e7681; margin-right: 10px; }
 </style>

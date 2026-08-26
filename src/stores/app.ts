@@ -42,6 +42,39 @@ export const useAppStore = defineStore('app', () => {
   const serverTraffic = ref<Map<string, any>>(new Map());  // 服务器流量
   // FRP 启动时刻（全局，修复：运行时长曾存组件本地，切页即重置）
   const frpcStartedAt = ref<number | null>(null);
+  // 实时日志缓冲（全局，修复：曾存组件本地，切页即清空）
+  const liveLogs = ref<{ ts: string; line: string; isError: boolean }[]>([]);
+  const MAX_LIVE_LOGS = 500;
+
+  /// 追加实时日志（后端 frpc-log 事件驱动）
+  function appendLiveLog(line: string, timestamp: number) {
+    const d = new Date(timestamp);
+    const ts = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+    liveLogs.value.push({ ts, line, isError: /ERR|error|失败|failed/i.test(line) });
+    if (liveLogs.value.length > MAX_LIVE_LOGS) {
+      liveLogs.value.splice(0, liveLogs.value.length - MAX_LIVE_LOGS);
+    }
+  }
+
+  function clearLiveLogs() {
+    liveLogs.value = [];
+  }
+
+  /// 从磁盘日志预填最近内容（概览挂载时实时缓冲为空则加载）
+  async function loadRecentLogsFromDisk() {
+    if (liveLogs.value.length > 0) return;
+    try {
+      const content = await invoke<string>('get_frpc_log_content');
+      if (!content) return;
+      const lines = content.trim().split('\n').slice(-100);
+      for (const l of lines) {
+        // 磁盘格式: [2026/8/26 18:50:33] [sid][FRP] xxx
+        const m = l.match(/^\[([^\]]+)\]\s(.*)$/);
+        if (m) appendLiveLog(m[2], Date.now());
+        else appendLiveLog(l, Date.now());
+      }
+    } catch { /* 磁盘日志不存在时静默 */ }
+  }
   const trafficHistory = ref<any[]>([]);  // 流量历史
   const connectionHistory = ref<any[]>([]);  // 连接历史
 
@@ -505,7 +538,6 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function refreshProcessStatus() {
-    const wasRunning = processStatus.value.running;
     try {
       const status = await invoke<any>('get_process_status');
       processStatus.value = {
@@ -513,13 +545,12 @@ export const useAppStore = defineStore('app', () => {
         pid: status.pid,
         state: status.state,
       };
-      // 外部恢复场景：应用重启后检测到 frpc 仍在运行，
-      // 从检测时刻起算运行时长（无法得知真实启动时刻）
-      if (!wasRunning && status.running && frpcStartedAt.value === null) {
-        frpcStartedAt.value = Date.now();
-      }
-      // 进程已停止则清空启动时刻
-      if (!status.running) {
+      // 运行时长以后端记录的进程启动时刻为权威来源
+      // （后端 start 时记录 last_start_time，应用重启后仍准确）
+      if (status.running) {
+        const backendTs = status.last_start_time ? status.last_start_time * 1000 : null;
+        frpcStartedAt.value = backendTs ?? (frpcStartedAt.value ?? Date.now());
+      } else {
         frpcStartedAt.value = null;
       }
     } catch (e) { console.error('Failed to get process status:', e); }
@@ -739,7 +770,7 @@ export const useAppStore = defineStore('app', () => {
     servers, proxies, versions, downloadedVersions, localPorts, mirrors,
     serverStatuses,
     // Getters
-    isRunning, frpcStartedAt, runningServersCount, activeProxies, activeProxiesCount,
+    isRunning, frpcStartedAt, liveLogs, appendLiveLog, clearLiveLogs, loadRecentLogsFromDisk, runningServersCount, activeProxies, activeProxiesCount,
     // Settings
     setTheme, setLanguage, loadSettings, saveSettings,
     setDefaultServerId,
