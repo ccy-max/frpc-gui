@@ -452,6 +452,11 @@ impl FrpProcessManager {
         self.is_process_alive()
     }
 
+    /// 获取 PID（公开版本）
+    pub fn get_pid(&self) -> u32 {
+        self.pid.load(Ordering::SeqCst)
+    }
+
     /// 获取 PID
     fn pid(&self) -> u32 {
         self.pid.load(Ordering::SeqCst)
