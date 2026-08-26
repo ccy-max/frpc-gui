@@ -597,7 +597,6 @@ pub async fn modify_proxy_status(
     info!("Modifying proxy status: {} -> {}", proxy_name, enabled);
     Ok(true)
 }
-}
 
 /// #12 检查应用更新（获取最新版本）
 #[tauri::command]
