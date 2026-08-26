@@ -285,9 +285,9 @@ pub fn get_frpc_version(path: String) -> Result<String, String> {
 pub async fn reset_all_config(state: State<'_, AppState>) -> Result<bool, String> {
     info!("Resetting all config");
 
-    // 1. 停止 FRP 进程
-    let mut pm_guard = state.process_manager.lock().await;
-    if let Some(pm) = pm_guard.as_mut() {
+    // 1. 停止所有 FRP 进程
+    let mut pm_guard = state.process_managers.lock().await;
+    for (_, pm) in pm_guard.iter_mut() {
         let _ = pm.stop().await;
     }
     drop(pm_guard);
@@ -583,19 +583,6 @@ pub async fn get_downloaded_versions(state: State<'_, AppState>) -> Result<Vec<F
         }
         None => Err("版本管理器未初始化".to_string()),
     }
-}
-
-/// #11 修改代理状态（单独切换，触发热重载）
-#[deprecated(note = "请使用新的多进程 API")]
-#[tauri::command]
-pub async fn modify_proxy_status(
-    proxy_name: String,
-    enabled: bool,
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
-    // 简化实现：总是返回成功
-    info!("Modifying proxy status: {} -> {}", proxy_name, enabled);
-    Ok(true)
 }
 
 /// #12 检查应用更新（获取最新版本）
