@@ -2,7 +2,7 @@
 
 use crate::frp::{
     ConfigManager, FrpConfig, FrpProcessManager, FrpVersionInfo, FrpVersionManager, MirrorInfo,
-    ProcessState, validate_config,
+    ProcessState,
 };
 use crate::utils::settings::{AppSettings, SettingsManager};
 use log::{error, info, warn};
