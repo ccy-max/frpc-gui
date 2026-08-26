@@ -4,6 +4,7 @@ use crate::frp::{
     ConfigManager, FrpConfig, FrpProcessManager, FrpVersionInfo, FrpVersionManager, MirrorInfo,
     ProcessState,
 };
+use crate::frp::config::validate_config;
 use crate::utils::settings::{AppSettings, SettingsManager};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -77,6 +78,68 @@ pub struct ConfigResponse {
     pub success: bool,
     pub config: Option<FrpConfig>,
     pub error: Option<String>,
+}
+
+/// 获取默认（全局）配置管理器
+///
+/// 多进程架构下，全局 UI 配置存储于 servers/server-default/config.json，
+/// 与各服务器的独立 config.toml 互不干扰。
+fn get_default_config_manager() -> Result<ConfigManager, String> {
+    let dir = get_server_config_dir("default")?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建配置目录失败：{}", e))?;
+    Ok(ConfigManager::new(dir.join("config.json")))
+}
+
+/// 加载全局 UI 配置（前端启动时调用）
+#[tauri::command]
+pub async fn load_config(state: State<'_, AppState>) -> Result<ConfigResponse, String> {
+    // 保持 state 参数以兼容未来扩展（如按活动服务器加载）
+    let _ = &state;
+    let cm = get_default_config_manager()?;
+    tauri::async_runtime::spawn_blocking(move || match cm.load() {
+        Ok(config) => Ok(ConfigResponse { success: true, config: Some(config), error: None }),
+        Err(e) => Ok(ConfigResponse {
+            success: false,
+            config: None,
+            error: Some(format!("加载配置失败：{}", e)),
+        }),
+    })
+    .await
+    .map_err(|e| format!("任务执行失败：{}", e))?
+}
+
+/// 保存全局 UI 配置（原子写入由调用方 ConfigManager 保证目录存在）
+#[tauri::command]
+pub async fn save_config(config: FrpConfig, state: State<'_, AppState>) -> Result<ConfigResponse, String> {
+    if let Err(e) = validate_config(&config) {
+        return Ok(ConfigResponse { success: false, config: None, error: Some(e) });
+    }
+    let _ = &state;
+    let cm = get_default_config_manager()?;
+    tauri::async_runtime::spawn_blocking(move || match cm.save(&config.clone()) {
+        Ok(_) => Ok(ConfigResponse { success: true, config: Some(config), error: None }),
+        Err(e) => Ok(ConfigResponse {
+            success: false,
+            config: None,
+            error: Some(format!("保存配置失败：{}", e)),
+        }),
+    })
+    .await
+    .map_err(|e| format!("任务执行失败：{}", e))?
+}
+
+/// 从 frpc.toml 导入配置
+#[tauri::command]
+pub async fn import_toml_config(toml_path: String, state: State<'_, AppState>) -> Result<FrpConfig, String> {
+    info!("Importing TOML config from {}", toml_path);
+    let _ = &state;
+    let cm = get_default_config_manager()?;
+    let path = PathBuf::from(&toml_path);
+    tauri::async_runtime::spawn_blocking(move || {
+        cm.import_toml(&path).map_err(|e| format!("导入 TOML 失败：{}", e))
+    })
+    .await
+    .map_err(|e| format!("任务执行失败：{}", e))?
 }
 
 // ==================== 配置管理（已废弃 - 使用多进程模式） ====================
@@ -471,8 +534,15 @@ pub async fn get_local_ports() -> Result<Vec<LocalPort>, String> {
 }
 
 /// #6 打开外部 URL
+/// #6 打开外部 URL（scheme 白名单校验，防止协议滥用）
 #[tauri::command]
 pub async fn open_url(url: String) -> Result<bool, String> {
+    const ALLOWED_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
+    let lower = url.to_lowercase();
+    if !ALLOWED_SCHEMES.iter().any(|s| lower.starts_with(s)) {
+        return Err(format!("不允许的 URL 协议：仅支持 http/https/mailto，收到: {}",
+            url.chars().take(32).collect::<String>()));
+    }
     info!("Opening URL: {}", url);
 
     #[cfg(windows)]
@@ -768,6 +838,9 @@ pub async fn start_server(
         log_tx,
     );
 
+    // 快照该服务器的 Admin API 端点（监控查询时按服务器独立凭据）
+    pm.set_admin_endpoint(config.admin.clone());
+
     // 启动进程
     match pm.start(&config).await {
         Ok(_) => {
@@ -936,20 +1009,16 @@ pub async fn get_all_proxy_status(
         if !is_running {
             continue;
         }
-        
-        // 这里需要从配置中获取 admin 配置
-        // 简化处理：假设 admin 配置为默认值
-        let admin_addr = "127.0.0.1";
-        let admin_port = 7400; // 需要从配置中读取
-        let admin_user = "admin";
-        let admin_password = "admin";
-        
+
+        // 从该服务器的进程管理器读取独立 Admin 端点配置
+        let admin = pm.get_admin_endpoint();
+
         // 查询 Admin API
         match query_admin_api::<AdminStatusResponse>(
-            admin_addr,
-            admin_port,
-            admin_user,
-            admin_password,
+            &admin.addr,
+            admin.port,
+            admin.user.as_deref().unwrap_or("admin"),
+            admin.password.as_deref().unwrap_or("admin"),
             "/api/status",
         ).await {
             Ok(status) => {
@@ -1009,17 +1078,14 @@ pub async fn get_server_traffic(
                 });
             }
             
-            // 查询 Admin API 获取流量
-            let admin_addr = "127.0.0.1";
-            let admin_port = 7400;
-            let admin_user = "admin";
-            let admin_password = "admin";
-            
+            // 从该服务器的进程管理器读取独立 Admin 端点配置
+            let admin = pm.get_admin_endpoint();
+
             match query_admin_api::<AdminStatusResponse>(
-                admin_addr,
-                admin_port,
-                admin_user,
-                admin_password,
+                &admin.addr,
+                admin.port,
+                admin.user.as_deref().unwrap_or("admin"),
+                admin.password.as_deref().unwrap_or("admin"),
                 "/api/status",
             ).await {
                 Ok(status) => {

@@ -353,6 +353,29 @@ export const useAppStore = defineStore('app', () => {
   async function refreshProxyStatus() {
     try {
       const statuses = await invoke<any[]>('get_all_proxy_status');
+
+      // 状态变化检测：对比新旧快照，向后端持久化连接/断开事件
+      const prev = proxyStatuses.value;
+      for (const s of statuses) {
+        const key = `${s.server_id}-${s.name}`;
+        const old = prev.get(key);
+        if (old && old.state !== s.state) {
+          const eventType =
+            s.state === 'online' ? 'connected' :
+            s.state === 'offline' ? 'disconnected' : null;
+          if (eventType) {
+            // 异步记录，失败不影响主流程（优雅降级：仅控制台告警）
+            invoke('log_connection_event', {
+              proxyName: s.name,
+              serverId: s.server_id,
+              eventType,
+              message: s.err_msg ?? null,
+              durationSecs: null,
+            }).catch(err => console.warn('[monitor] 记录连接事件失败:', err));
+          }
+        }
+      }
+
       proxyStatuses.value = new Map(statuses.map(s => [`${s.server_id}-${s.name}`, s]));
     } catch (e) {
       console.error('Failed to refresh proxy status:', e);

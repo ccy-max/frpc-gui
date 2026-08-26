@@ -65,7 +65,10 @@ pub fn run() {
             // 设置持久化
             commands::load_settings,
             commands::save_settings,
-            // 配置管理（已废弃 - 使用多进程模式）
+            // 配置管理（全局 UI 配置）
+            commands::load_config,
+            commands::save_config,
+            commands::import_toml_config,
             commands::reset_all_config,
             // 进程控制
             commands::start_frp,

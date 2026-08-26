@@ -19,6 +19,22 @@ export default defineConfig(async () => ({
     },
   },
   clearScreen: false,
+  build: {
+    // 第三方库分包：ant-design-vue / 图标 独立缓存，业务代码改动不失效长缓存
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-antd": ["ant-design-vue"],
+          "vendor-icons": ["@ant-design/icons-vue"],
+          "vendor-tauri": [
+            "@tauri-apps/api",
+            "@tauri-apps/plugin-dialog",
+          ],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 700,
+  },
   server: {
     port: 1420,
     strictPort: true,

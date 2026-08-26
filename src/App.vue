@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, onUnmounted } from 'vue';
 import { useAppStore } from '@/stores/app';
 
 const appStore = useAppStore();
@@ -10,6 +10,11 @@ onMounted(async () => {
   setTimeout(() => {
     appStore.loadConfig().catch(console.error);
   }, 100);
+});
+
+// 组件卸载时清理全局轮询定时器，防止内存泄漏
+onUnmounted(() => {
+  appStore.cleanup();
 });
 </script>
 

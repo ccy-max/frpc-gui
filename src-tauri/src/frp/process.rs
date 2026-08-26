@@ -53,6 +53,8 @@ pub struct FrpProcessManager {
     last_recovery_time: Arc<Mutex<i64>>,
     last_notify_time: Arc<Mutex<i64>>,
     recovery_checking: Arc<AtomicBool>,
+    /// 该进程的 Admin API 端点 (addr, port, user, password)，启动时从配置快照
+    admin_endpoint: std::sync::Mutex<Option<crate::frp::config::AdminConfig>>,
 }
 
 impl FrpProcessManager {
@@ -73,7 +75,22 @@ impl FrpProcessManager {
             last_recovery_time: Arc::new(Mutex::new(-1)),
             last_notify_time: Arc::new(Mutex::new(-1)),
             recovery_checking: Arc::new(AtomicBool::new(false)),
+            admin_endpoint: std::sync::Mutex::new(None),
         }
+    }
+
+    /// 记录该进程的 Admin API 端点配置（启动时调用）
+    pub fn set_admin_endpoint(&self, cfg: crate::frp::config::AdminConfig) {
+        *self.admin_endpoint.lock().unwrap_or_else(|e| e.into_inner()) = Some(cfg);
+    }
+
+    /// 获取 Admin 端点；未配置时回退到默认值（127.0.0.1:7400 admin/admin）
+    pub fn get_admin_endpoint(&self) -> crate::frp::config::AdminConfig {
+        self.admin_endpoint
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default()
     }
 
     /// 启动 FRP 进程
@@ -109,14 +126,14 @@ impl FrpProcessManager {
                 info!("FRP process started with PID: {}", pid);
 
                 self.pid.store(pid, Ordering::SeqCst);
-                *self.last_start_time.lock().unwrap() = chrono::Local::now().timestamp();
+                *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner()) = chrono::Local::now().timestamp();
 
                 // 提取 stdout/stderr
                 let stdout = child.stdout.take();
                 let stderr = child.stderr.take();
 
                 // 保存子进程句柄
-                *self.child.lock().unwrap() = Some(child);
+                *self.child.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
 
                 // 启动日志捕获（stdout）
                 if let Some(stdout) = stdout {
@@ -205,7 +222,7 @@ impl FrpProcessManager {
         }
 
         // 关闭子进程句柄
-        if let Some(mut child) = self.child.lock().unwrap().take() {
+        if let Some(mut child) = self.child.lock().unwrap_or_else(|e| e.into_inner()).take() {
             child.kill().ok();
             child.wait().ok();
         }
@@ -308,7 +325,7 @@ impl FrpProcessManager {
                         if let Ok(pid) = parts[1].parse::<u32>() {
                             self.pid.store(pid, Ordering::SeqCst);
                             self.running.store(true, Ordering::SeqCst);
-                            *self.last_start_time.lock().unwrap() = chrono::Local::now().timestamp();
+                            *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner()) = chrono::Local::now().timestamp();
                             info!("Detected external frpc process, PID: {}", pid);
                             return true;
                         }
@@ -330,7 +347,7 @@ impl FrpProcessManager {
                     if let Ok(pid) = first_line.trim().parse::<u32>() {
                         self.pid.store(pid, Ordering::SeqCst);
                         self.running.store(true, Ordering::SeqCst);
-                        *self.last_start_time.lock().unwrap() = chrono::Local::now().timestamp();
+                        *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner()) = chrono::Local::now().timestamp();
                         info!("Detected external frpc process, PID: {}", pid);
                         return true;
                     }
@@ -349,7 +366,7 @@ impl FrpProcessManager {
             return None;
         }
 
-        let start_time = *self.last_start_time.lock().unwrap();
+        let start_time = *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner());
         if start_time == -1 {
             return None;
         }
@@ -392,12 +409,12 @@ impl FrpProcessManager {
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
                 let running = pm.is_process_alive();
-                let start_time = *pm.last_start_time.lock().unwrap();
+                let start_time = *pm.last_start_time.lock().unwrap_or_else(|e| e.into_inner());
 
                 if !running && start_time != -1 {
                     // 检查冷却期
                     let now = chrono::Local::now().timestamp();
-                    let last_recovery = *pm.last_recovery_time.lock().unwrap();
+                    let last_recovery = *pm.last_recovery_time.lock().unwrap_or_else(|e| e.into_inner());
                     if last_recovery != -1 && (now - last_recovery) < RECOVERY_COOLDOWN_SECS as i64 {
                         continue;
                     }
@@ -406,7 +423,7 @@ impl FrpProcessManager {
                         continue;
                     }
 
-                    *pm.last_recovery_time.lock().unwrap() = now;
+                    *pm.last_recovery_time.lock().unwrap_or_else(|e| e.into_inner()) = now;
 
                     // 检查网络
                     if check_internet().await {
@@ -466,7 +483,7 @@ impl FrpProcessManager {
     fn reset_state(&self) {
         self.running.store(false, Ordering::SeqCst);
         self.pid.store(0, Ordering::SeqCst);
-        *self.last_start_time.lock().unwrap() = -1;
+        *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner()) = -1;
         self.recovery_checking.store(false, Ordering::SeqCst);
     }
 
@@ -484,6 +501,9 @@ impl FrpProcessManager {
             last_recovery_time: self.last_recovery_time.clone(),
             last_notify_time: self.last_notify_time.clone(),
             recovery_checking: self.recovery_checking.clone(),
+            admin_endpoint: std::sync::Mutex::new(
+                self.admin_endpoint.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            ),
         }
     }
 }
