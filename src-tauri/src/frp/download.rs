@@ -4,7 +4,7 @@
 //! 解压（tar.gz + zip）、SHA256 校验、本地导入
 
 use anyhow::{Context, Result};
-use log::{error, info, warn};
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};

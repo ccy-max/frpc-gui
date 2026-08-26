@@ -37,7 +37,7 @@ impl AppState {
         }
     }
 
-    pub fn with_config(config_manager: ConfigManager) -> Self {
+    pub fn with_config(_config_manager: ConfigManager) -> Self {
         let (log_tx, _) = mpsc::channel(100);
         Self {
             process_managers: Mutex::new(HashMap::new()),
@@ -79,61 +79,63 @@ pub struct ConfigResponse {
     pub error: Option<String>,
 }
 
-#[tauri::command]
-pub async fn load_config(state: State<'_, AppState>) -> Result<ConfigResponse, String> {
-    let cm = state.config_manager.lock().await;
-    match cm.as_ref() {
-        Some(m) => match m.load() {
-            Ok(config) => Ok(ConfigResponse { success: true, config: Some(config), error: None }),
-            Err(e) => Ok(ConfigResponse { success: false, config: None, error: Some(e.to_string()) }),
-        },
-        None => Ok(ConfigResponse { success: false, config: None, error: Some("配置管理器未初始化".into()) }),
-    }
-}
+// ==================== 配置管理（已废弃 - 使用多进程模式） ====================
+// 以下 API 已废弃，配置现在通过服务器管理
+// #[tauri::command]
+// pub async fn load_config(state: State<'_, AppState>) -> Result<ConfigResponse, String> {
+//     let cm = state.config_managers.lock().await;
+//     match cm.as_ref() {
+//         Some(m) => match m.load() {
+//             Ok(config) => Ok(ConfigResponse { success: true, config: Some(config), error: None }),
+//             Err(e) => Ok(ConfigResponse { success: false, config: None, error: Some(e.to_string()) }),
+//         },
+//         None => Ok(ConfigResponse { success: false, config: None, error: Some("配置管理器未初始化".into()) }),
+//     }
+// }
 
-#[tauri::command]
-pub async fn save_config(config: FrpConfig, state: State<'_, AppState>) -> Result<ConfigResponse, String> {
-    if let Err(e) = validate_config(&config) {
-        return Ok(ConfigResponse { success: false, config: None, error: Some(e) });
-    }
-    let cm = state.config_manager.lock().await;
-    match cm.as_ref() {
-        Some(m) => match m.save(&config) {
-            Ok(_) => Ok(ConfigResponse { success: true, config: Some(config), error: None }),
-            Err(e) => Ok(ConfigResponse { success: false, config: None, error: Some(e.to_string()) }),
-        },
-        None => Ok(ConfigResponse { success: false, config: None, error: Some("配置管理器未初始化".into()) }),
-    }
-}
+// #[tauri::command]
+// pub async fn save_config(config: FrpConfig, state: State<'_, AppState>) -> Result<ConfigResponse, String> {
+//     if let Err(e) = validate_config(&config) {
+//         return Ok(ConfigResponse { success: false, config: None, error: Some(e) });
+//     }
+//     let cm = state.config_managers.lock().await;
+//     match cm.as_ref() {
+//         Some(m) => match m.save(&config) {
+//             Ok(_) => Ok(ConfigResponse { success: true, config: Some(config), error: None }),
+//             Err(e) => Ok(ConfigResponse { success: false, config: None, error: Some(e.to_string()) }),
+//         },
+//         None => Ok(ConfigResponse { success: false, config: None, error: Some("配置管理器未初始化".into()) }),
+//     }
+// }
 
-#[tauri::command]
-pub async fn export_config(target_path: String, state: State<'_, AppState>) -> Result<bool, String> {
-    let cm = state.config_manager.lock().await;
-    match cm.as_ref() {
-        Some(m) => { m.export_to(&PathBuf::from(&target_path)).map_err(|e| e.to_string())?; Ok(true) }
-        None => Err("配置管理器未初始化".into()),
-    }
-}
+// #[tauri::command]
+// pub async fn export_config(target_path: String, state: State<'_, AppState>) -> Result<bool, String> {
+//     let cm = state.config_managers.lock().await;
+//     match cm.as_ref() {
+//         Some(m) => { m.export_to(&PathBuf::from(&target_path)).map_err(|e| e.to_string())?; Ok(true) }
+//         None => Err("配置管理器未初始化".into()),
+//     }
+// }
 
-#[tauri::command]
-pub async fn import_config(source_path: String, state: State<'_, AppState>) -> Result<FrpConfig, String> {
-    let cm = state.config_manager.lock().await;
-    match cm.as_ref() {
-        Some(m) => { m.import_from(&PathBuf::from(&source_path)).map_err(|e| e.to_string())?; m.load().map_err(|e| e.to_string()) }
-        None => Err("配置管理器未初始化".into()),
-    }
-}
+// #[tauri::command]
+// pub async fn import_config(source_path: String, state: State<'_, AppState>) -> Result<FrpConfig, String> {
+//     let cm = state.config_managers.lock().await;
+//     match cm.as_ref() {
+//         Some(m) => { m.import_from(&PathBuf::from(&source_path)).map_err(|e| e.to_string())?; m.load().map_err(|e| e.to_string()) }
+//         None => Err("配置管理器未初始化".into()),
+//     }
+// }
 
-/// 从 frpc.toml 导入配置
-#[tauri::command]
-pub async fn import_toml_config(toml_path: String, state: State<'_, AppState>) -> Result<FrpConfig, String> {
-    info!("Importing TOML config from {}", toml_path);
-    let cm = state.config_manager.lock().await;
-    match cm.as_ref() {
-        Some(m) => m.import_toml(&PathBuf::from(&toml_path)).map_err(|e| e.to_string()),
-        None => Err("配置管理器未初始化".to_string()),
-    }
-}
+// /// 从 frpc.toml 导入配置
+// #[tauri::command]
+// pub async fn import_toml_config(toml_path: String, state: State<'_, AppState>) -> Result<FrpConfig, String> {
+//     info!("Importing TOML config from {}", toml_path);
+//     let cm = state.config_managers.lock().await;
+//     match cm.as_ref() {
+//         Some(m) => m.import_toml(&PathBuf::from(&toml_path)).map_err(|e| e.to_string()),
+//         None => Err("配置管理器未初始化".to_string()),
+//     }
+// }
 
 // ==================== 进程控制（旧版单进程 API - 已废弃） ====================
 // 注意：以下 API 已被新的多进程 API 替代
@@ -183,7 +185,7 @@ pub async fn get_process_status(state: State<'_, AppState>) -> Result<ProcessSta
 
 #[deprecated(note = "请使用新的多进程 API")]
 #[tauri::command]
-pub async fn detect_frpc_process(state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn detect_frpc_process(_state: State<'_, AppState>) -> Result<bool, String> {
     // 简化实现
     Ok(false)
 }
@@ -197,14 +199,12 @@ pub async fn reload_frp(config: FrpConfig, state: State<'_, AppState>) -> Result
 #[deprecated(note = "请使用新的多进程 API")]
 #[tauri::command]
 pub async fn modify_proxy_status(
-    proxy_name: String,
-    enabled: bool,
-    state: State<'_, AppState>,
+    _proxy_name: String,
+    _enabled: bool,
+    _state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    // 简化实现：找到第一个包含该代理的服务器
-    let servers_guard = state.config_managers.lock().await;
-    // 这里需要更复杂的逻辑，暂时返回成功
-    drop(servers_guard);
+    // 简化实现：总是返回成功
+    info!("Modifying proxy status");
     Ok(true)
 }
 
@@ -331,7 +331,7 @@ pub async fn reset_all_config(state: State<'_, AppState>) -> Result<bool, String
 
 /// #2 读取 frpc 日志文件内容
 #[tauri::command]
-pub async fn get_frpc_log_content(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn get_frpc_log_content(_state: State<'_, AppState>) -> Result<String, String> {
     let config_dir = dirs::config_dir()
         .map(|d| d.join("frpc-gui"))
         .unwrap_or_else(|| PathBuf::from("."));
@@ -499,6 +499,8 @@ pub async fn open_url(url: String) -> Result<bool, String> {
 pub async fn relaunch_app(app: tauri::AppHandle) -> Result<bool, String> {
     info!("Relaunching app");
     app.restart();
+    // app.restart() 永远不会返回，所以这里不会执行
+    #[allow(unreachable_code)]
     Ok(true)
 }
 
@@ -535,8 +537,8 @@ pub async fn open_app_data() -> Result<bool, String> {
 /// #9 通用文件选择对话框
 #[tauri::command]
 pub async fn select_local_file(
-    name: Option<String>,
-    extensions: Option<Vec<String>>,
+    _name: Option<String>,
+    _extensions: Option<Vec<String>>,
 ) -> Result<Option<String>, String> {
     // 前端已使用 @tauri-apps/plugin-dialog 直接调用
     // 此命令保留作为后端备用
@@ -964,7 +966,7 @@ pub async fn get_all_proxy_status(
                     });
                 }
             }
-            Err(e) => {
+            Err(_e) => {
                 // Admin API 不可用时，使用进程状态作为代理状态
                 proxy_statuses.push(ProxyStatusInfo {
                     name: format!("{}-proxy", server_id),
@@ -1039,7 +1041,7 @@ pub async fn get_server_traffic(
                     }
                     
                     // 持久化今日流量（使用互斥锁防止并发）
-                    let _guard = MONITORING_DATA_MUTEX.lock().unwrap();
+                    let _guard = MONITORING_DATA_MUTEX.lock().await;
                     
                     let today = get_today_date();
                     let mut monitoring_data = load_monitoring_data()?;
@@ -1138,8 +1140,8 @@ pub async fn get_connection_history(
         monitoring_data.connection_history
             .into_iter()
             .filter(|h| {
-                (proxy_name.is_none() || h.proxy_name == proxy_name.as_ref().unwrap()) &&
-                (server_id.is_none() || h.server_id == server_id.as_ref().unwrap())
+                (proxy_name.is_none() || h.proxy_name == proxy_name.as_ref().unwrap().as_str()) &&
+                (server_id.is_none() || h.server_id == server_id.as_ref().unwrap().as_str())
             })
             .collect()
     } else {
@@ -1159,7 +1161,7 @@ pub async fn log_connection_event(
     duration_secs: Option<u64>,
 ) -> Result<(), String> {
     // 使用互斥锁防止并发写入
-    let _guard = MONITORING_DATA_MUTEX.lock().unwrap();
+    let _guard = MONITORING_DATA_MUTEX.lock().await;
     
     let mut monitoring_data = load_monitoring_data()?;
     

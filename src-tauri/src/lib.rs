@@ -4,7 +4,6 @@ mod commands;
 mod frp;
 mod utils;
 
-use commands::*;
 use log::info;
 use tauri::Manager;
 

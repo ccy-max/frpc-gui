@@ -374,7 +374,7 @@ impl FrpProcessManager {
                 return None;
             }
             // 检查错误模式
-            if let Some(pattern) = FRPC_ERROR_PATTERNS.iter().find(|p| line.contains(*p)) {
+            if FRPC_ERROR_PATTERNS.iter().any(|p| line.contains(*p)) {
                 return Some(line.trim().to_string());
             }
         }
