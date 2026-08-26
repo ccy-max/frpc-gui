@@ -443,8 +443,9 @@ pub async fn open_frpc_log_file() -> Result<bool, String> {
 
     #[cfg(windows)]
     {
-        std::process::Command::new("explorer")
-            .arg(&log_path)
+        let mut cmd = std::process::Command::new("explorer");
+        crate::utils::hide_window(&mut cmd);
+        cmd.arg(&log_path)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -473,7 +474,9 @@ pub async fn get_local_ports() -> Result<Vec<LocalPort>, String> {
 
     #[cfg(windows)]
     {
-        let output = std::process::Command::new("netstat")
+        let mut cmd = std::process::Command::new("netstat");
+        crate::utils::hide_window(&mut cmd);
+        let output = cmd
             .args(["-a", "-n"])
             .output()
             .map_err(|e| e.to_string())?;
@@ -561,8 +564,9 @@ pub async fn open_url(url: String) -> Result<bool, String> {
 
     #[cfg(windows)]
     {
-        std::process::Command::new("rundll32")
-            .args(["url.dll,FileProtocolHandler", &url])
+        let mut cmd = std::process::Command::new("rundll32");
+        crate::utils::hide_window(&mut cmd);
+        cmd.args(["url.dll,FileProtocolHandler", &url])
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -601,8 +605,9 @@ pub async fn open_app_data() -> Result<bool, String> {
 
     #[cfg(windows)]
     {
-        std::process::Command::new("explorer")
-            .arg(&config_dir)
+        let mut cmd = std::process::Command::new("explorer");
+        crate::utils::hide_window(&mut cmd);
+        cmd.arg(&config_dir)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -886,6 +891,8 @@ pub async fn start_server(
 
     // 快照该服务器的 Admin API 端点（监控查询时按服务器独立凭据）
     pm.set_admin_endpoint(config.admin.clone());
+    // 标识服务器来源（实时日志事件推送用）
+    pm.set_server_id(server_id.clone());
 
     // 启动进程
     match pm.start(&config).await {
@@ -1530,7 +1537,26 @@ pub fn init_app(app: &mut tauri::App) {
     std::fs::create_dir_all(&install_dir).ok();
     let version_manager = FrpVersionManager::new(install_dir);
 
-    let (log_tx, _) = mpsc::channel(100);
+    // 日志通道：receiver 必须被消费！
+    // 历史 bug：`let (log_tx, _) = channel(100)` 直接丢弃 receiver，
+    // frpc 实时日志发进无人消费的通道全部蒸发，前端永远收不到。
+    let (log_tx, mut log_rx) = mpsc::channel::<String>(1000);
+
+    // 消费日志并通过事件推送前端（概览页实时日志的数据源）
+    let handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(line) = log_rx.recv().await {
+            use tauri::Emitter;
+            let payload = serde_json::json!({
+                "line": line,
+                "timestamp": chrono::Utc::now().timestamp_millis(),
+            });
+            if handle.emit("frpc-log", payload).is_err() {
+                // 前端未监听时静默丢弃（如窗口最小化期间），不中断消费
+            }
+        }
+    });
+
     let app_state = AppState {
         process_managers: Mutex::new(HashMap::new()),
         config_managers: Mutex::new(HashMap::new()),

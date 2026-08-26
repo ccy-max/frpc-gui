@@ -172,8 +172,11 @@ export const useAppStore = defineStore('app', () => {
     try {
       const result = await invoke<any>('load_config');
       if (result.success && result.config) {
+        // 只更新 frpConfig，严禁覆盖 proxies！
+        // proxies 的唯一可信来源是持久化数据（loadPersistentData），
+        // 此处覆盖会导致启动竞态：持久化先加载显示(闪一下) →
+        // 本函数后完成用 default 配置的空 proxies 覆盖(没了)
         frpConfig.value = result.config;
-        proxies.value = result.config.proxies || [];
       }
       return result;
     } catch (e) {

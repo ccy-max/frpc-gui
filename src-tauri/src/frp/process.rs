@@ -55,6 +55,8 @@ pub struct FrpProcessManager {
     recovery_checking: Arc<AtomicBool>,
     /// 该进程的 Admin API 端点 (addr, port, user, password)，启动时从配置快照
     admin_endpoint: std::sync::Mutex<Option<crate::frp::config::AdminConfig>>,
+    /// 所属服务器 ID（实时日志事件推送时标识来源）
+    server_id: std::sync::Mutex<Option<String>>,
 }
 
 impl FrpProcessManager {
@@ -76,7 +78,22 @@ impl FrpProcessManager {
             last_notify_time: Arc::new(Mutex::new(-1)),
             recovery_checking: Arc::new(AtomicBool::new(false)),
             admin_endpoint: std::sync::Mutex::new(None),
+            server_id: std::sync::Mutex::new(None),
         }
+    }
+
+    /// 设置所属服务器 ID（实时日志事件标识来源）
+    pub fn set_server_id(&self, id: String) {
+        *self.server_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
+    }
+
+    /// 读取所属服务器 ID
+    fn get_server_id(&self) -> String {
+        self.server_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string())
     }
 
     /// 记录该进程的 Admin API 端点配置（启动时调用）
@@ -138,12 +155,13 @@ impl FrpProcessManager {
                 // 启动日志捕获（stdout）
                 if let Some(stdout) = stdout {
                     let log_tx = self.log_tx.clone();
+                    let sid = self.get_server_id();
                     tokio::spawn(async move {
                         let reader = BufReader::new(stdout);
                         for line in reader.lines() {
                             match line {
                                 Ok(text) => {
-                                    if log_tx.send(format!("[FRP] {}", text)).await.is_err() {
+                                    if log_tx.send(format!("[{}][FRP] {}", sid, text)).await.is_err() {
                                         break;
                                     }
                                 }
@@ -156,12 +174,13 @@ impl FrpProcessManager {
                 // 启动日志捕获（stderr）
                 if let Some(stderr) = stderr {
                     let log_tx = self.log_tx.clone();
+                    let sid = self.get_server_id();
                     tokio::spawn(async move {
                         let reader = BufReader::new(stderr);
                         for line in reader.lines() {
                             match line {
                                 Ok(text) => {
-                                    if log_tx.send(format!("[FRP ERR] {}", text)).await.is_err() {
+                                    if log_tx.send(format!("[{}][FRP ERR] {}", sid, text)).await.is_err() {
                                         break;
                                     }
                                 }
@@ -253,7 +272,9 @@ impl FrpProcessManager {
         std::fs::write(&self.config_path, toml_content)?;
 
         // 执行 frpc reload -c config_path
-        let output = Command::new(&self.frpc_path)
+        let mut cmd = Command::new(&self.frpc_path);
+        crate::utils::hide_window(&mut cmd);
+        let output = cmd
             .arg("reload")
             .arg("-c")
             .arg(&self.config_path)
@@ -296,7 +317,9 @@ impl FrpProcessManager {
         {
             // Windows: 用 tasklist 检查进程是否存在
             use std::process::Command;
-            let output = Command::new("tasklist")
+            let mut cmd = Command::new("tasklist");
+            crate::utils::hide_window(&mut cmd);
+            let output = cmd
                 .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
                 .output();
             match output {
@@ -314,7 +337,9 @@ impl FrpProcessManager {
         #[cfg(windows)]
         {
             let frpc_name = "frpc.exe";
-            let output = Command::new("tasklist")
+            let mut cmd = Command::new("tasklist");
+            crate::utils::hide_window(&mut cmd);
+            let output = cmd
                 .args(["/FI", &format!("IMAGENAME eq {}", frpc_name), "/FO", "CSV", "/NH"])
                 .output();
             if let Ok(o) = output {
@@ -504,6 +529,9 @@ impl FrpProcessManager {
             admin_endpoint: std::sync::Mutex::new(
                 self.admin_endpoint.lock().unwrap_or_else(|e| e.into_inner()).clone(),
             ),
+            server_id: std::sync::Mutex::new(
+                self.server_id.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            ),
         }
     }
 }
@@ -513,7 +541,9 @@ async fn check_internet() -> bool {
     // 使用 std::process::Command 同步检查（简单可靠）
     #[cfg(windows)]
     {
-        let output = Command::new("ping")
+        let mut cmd = Command::new("ping");
+        crate::utils::hide_window(&mut cmd);
+        let output = cmd
             .args(["-n", "1", "8.8.8.8"])
             .output();
         match output {
@@ -543,7 +573,9 @@ pub fn check_frpc_exists(path: &Path) -> bool {
 
 /// 获取 FRP 版本
 pub fn get_frpc_version(path: &Path) -> Result<String> {
-    let output = Command::new(path)
+    let mut cmd = Command::new(path);
+    crate::utils::hide_window(&mut cmd);
+    let output = cmd
         .arg("-v")
         .output()
         .with_context(|| "执行 frpc -v 失败")?;

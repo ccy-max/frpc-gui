@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, h } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch, nextTick, h } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter } from 'vue-router';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   PlusOutlined, PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, ClockCircleOutlined,
@@ -59,14 +60,73 @@ function formatUptime(seconds: number): string {
   return `${d}天${h}时`;
 }
 
-onMounted(() => {
+// ==================== 实时日志（frpc 运行时日志） ====================
+interface LiveLogLine {
+  ts: string;      // 格式化时间 HH:MM:SS
+  line: string;    // 日志原文（含 [serverId] 前缀）
+  isError: boolean;
+}
+
+const liveLogs = ref<LiveLogLine[]>([]);
+const autoScroll = ref(true);
+const logTerminalRef = ref<HTMLElement | null>(null);
+const MAX_LOG_LINES = 500;
+let unlistenLog: UnlistenFn | null = null;
+
+function fmtTime(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function appendLiveLog(line: string, timestamp: number) {
+  liveLogs.value.push({
+    ts: fmtTime(timestamp),
+    line,
+    isError: /ERR|error|失败|failed/i.test(line),
+  });
+  // 环形上限，防止长时间运行内存膨胀
+  if (liveLogs.value.length > MAX_LOG_LINES) {
+    liveLogs.value.splice(0, liveLogs.value.length - MAX_LOG_LINES);
+  }
+  // 自动滚动到底部（用户可手动上滚关闭自动跟随）
+  if (autoScroll.value) {
+    nextTick(() => {
+      const el = logTerminalRef.value;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  }
+}
+
+function onTerminalScroll() {
+  const el = logTerminalRef.value;
+  if (!el) return;
+  // 距底部 40px 内视为跟随；上滚则暂停自动滚动
+  autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+}
+
+function clearLiveLogs() {
+  liveLogs.value = [];
+}
+
+onMounted(async () => {
   uptimeTimer = setInterval(() => {
     if (appStore.isRunning) uptimeSeconds.value++;
   }, 1000);
+
+  // 订阅后端 frpc 实时日志事件
+  try {
+    unlistenLog = await listen<{ line: string; timestamp: number }>('frpc-log', (event) => {
+      appendLiveLog(event.payload.line, event.payload.timestamp);
+    });
+  } catch (e) {
+    console.error('订阅实时日志失败:', e);
+  }
 });
 
 onUnmounted(() => {
   if (uptimeTimer) clearInterval(uptimeTimer);
+  if (unlistenLog) unlistenLog();
 });
 
 const prevRunning = ref(appStore.isRunning);
@@ -74,9 +134,6 @@ watch(() => appStore.isRunning, (newVal) => {
   if (newVal !== prevRunning.value && newVal) uptimeSeconds.value = 0;
   prevRunning.value = newVal;
 });
-
-const recentLogs = computed(() => appStore.logs.slice(-5).reverse());
-const logColors: Record<string, string> = { debug: 'purple', info: 'blue', warn: 'orange', error: 'red' };
 </script>
 
 <template>
@@ -126,26 +183,37 @@ const logColors: Record<string, string> = { debug: 'purple', info: 'blue', warn:
       </a-space>
     </a-card>
 
-    <a-card title="最近日志" class="logs-card">
-      <template #extra>
-        <a-button type="link" @click="router.push('/logs')">查看全部</a-button>
+    <!-- frpc 运行时实时日志终端 -->
+    <a-card class="logs-card">
+      <template #title>
+        <span>实时日志</span>
+        <a-tag v-if="!autoScroll" color="orange" style="margin-left: 8px">已暂停跟随</a-tag>
       </template>
-      <a-empty v-if="recentLogs.length === 0" description="暂无日志" />
-      <a-table v-else :data-source="recentLogs" :pagination="false" size="small">
-        <a-table-column title="时间" dataIndex="timestamp" width="180">
-          <template #bodyCell="{ record }">
-            {{ new Date(record.timestamp).toLocaleString() }}
-          </template>
-        </a-table-column>
-        <a-table-column title="级别" key="level" width="80">
-          <template #bodyCell="{ record }">
-            <a-tag :color="logColors[record.level] || ''">
-              {{ record.level.toUpperCase() }}
-            </a-tag>
-          </template>
-        </a-table-column>
-        <a-table-column title="消息" dataIndex="message" />
-      </a-table>
+      <template #extra>
+        <a-space>
+          <a-checkbox v-model:checked="autoScroll" size="small">自动滚动</a-checkbox>
+          <a-button size="small" @click="clearLiveLogs">清空</a-button>
+          <a-button type="link" size="small" @click="router.push('/logs')">查看全部</a-button>
+        </a-space>
+      </template>
+      <div
+        ref="logTerminalRef"
+        class="log-terminal"
+        @scroll="onTerminalScroll"
+      >
+        <div v-if="liveLogs.length === 0" class="log-empty">
+          暂无运行日志 —— 启动 FRP 后此处将实时显示 frpc 输出
+        </div>
+        <div
+          v-for="(log, i) in liveLogs"
+          :key="i"
+          class="log-line"
+          :class="{ 'log-error': log.isError }"
+        >
+          <span class="log-ts">{{ log.ts }}</span>
+          <span class="log-text">{{ log.line }}</span>
+        </div>
+      </div>
     </a-card>
   </div>
 </template>
@@ -227,6 +295,58 @@ const logColors: Record<string, string> = { debug: 'purple', info: 'blue', warn:
     font-weight: 600;
     font-size: 16px;
     color: #1e293b;
+  }
+
+  // 终端风格实时日志
+  .log-terminal {
+    background: #0f172a;
+    border-radius: 8px;
+    padding: 12px 16px;
+    height: 360px;
+    overflow-y: auto;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+
+    .log-empty {
+      color: #475569;
+      text-align: center;
+      padding-top: 150px;
+      user-select: none;
+    }
+
+    .log-line {
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #cbd5e1;
+
+      .log-ts {
+        color: #64748b;
+        margin-right: 10px;
+        user-select: none;
+      }
+
+      &.log-error {
+        color: #f87171;
+
+        .log-ts { color: #b91c1c; }
+      }
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+    }
+
+    &::-webkit-scrollbar {
+      width: 8px;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
   }
 }
 </style>

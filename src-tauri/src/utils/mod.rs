@@ -8,6 +8,23 @@ pub mod settings;
 
 use anyhow::Result;
 use std::path::PathBuf;
+use std::process::Command;
+
+/// Windows 下隐藏控制台窗口（CREATE_NO_WINDOW = 0x08000000）
+///
+/// 背景：GUI 应用中所有子进程（tasklist/ping/netstat/powershell/frpc 等）
+/// 默认会弹出 cmd 窗口，尤其是进程守护线程周期执行 tasklist/ping 时
+/// 反复闪窗。所有子进程创建后必须调用本函数。
+#[cfg(windows)]
+pub fn hide_window(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+/// 非 Windows 平台空实现（保持调用点代码统一）
+#[cfg(not(windows))]
+pub fn hide_window(_cmd: &mut Command) {}
 
 /// 获取应用数据目录
 pub fn get_app_data_dir() -> Result<PathBuf> {

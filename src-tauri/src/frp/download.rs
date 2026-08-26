@@ -330,8 +330,9 @@ impl FrpVersionManager {
                 archive_path.display(),
                 version_dir.display()
             );
-            std::process::Command::new("powershell")
-                .args(["-Command", &ps_script])
+            let mut cmd = std::process::Command::new("powershell");
+            crate::utils::hide_window(&mut cmd);
+            cmd.args(["-Command", &ps_script])
                 .output()
                 .context("PowerShell 解压失败")?;
 
