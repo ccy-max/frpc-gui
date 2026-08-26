@@ -74,7 +74,11 @@ fn get_platform_keywords() -> Vec<&'static str> {
 pub fn get_mirrors() -> Vec<MirrorInfo> {
     vec![
         MirrorInfo { id: "github".to_string(), name: "GitHub 官方".to_string(), prefix: "".to_string() },
-        MirrorInfo { id: "ghproxy".to_string(), name: "ghproxy 加速".to_string(), prefix: "https://ghproxy.com/".to_string() },
+        // 历史：ghproxy.com 已于 2023 年底关停，勿再使用
+        // 可用性 2026-08 实测：ghproxy.net ✅ gh-proxy.com ✅ ghfast.top 部分网络不可达
+        MirrorInfo { id: "ghproxy_net".to_string(), name: "ghproxy.net 加速".to_string(), prefix: "https://ghproxy.net/".to_string() },
+        MirrorInfo { id: "ghproxy_com".to_string(), name: "gh-proxy.com 加速".to_string(), prefix: "https://gh-proxy.com/".to_string() },
+        MirrorInfo { id: "ghfast".to_string(), name: "ghfast 加速".to_string(), prefix: "https://ghfast.top/".to_string() },
         MirrorInfo { id: "jwinks".to_string(), name: "jwinks 镜像".to_string(), prefix: "https://gh.jwinks.com/file/".to_string() },
     ]
 }
@@ -230,17 +234,20 @@ impl FrpVersionManager {
     /// 本地内置版本回退
     fn get_local_versions(&self) -> Result<Vec<FrpVersionInfo>> {
         // 内置几个常见版本
+        // 历史 bug：Windows 官方资产是 .zip，此前误拼 .tar.gz 导致 404，
+        // 镜像又返回 200+HTML 错误页 → 解压报 "failed to iterate over archive"
         let keywords = get_platform_keywords();
-        let suffix = if keywords.contains(&"windows") {
-            if keywords.contains(&"amd64") { "windows_amd64" }
-            else if keywords.contains(&"arm64") { "windows_arm64" }
-            else { "windows_386" }
+        let (suffix, ext) = if keywords.contains(&"windows") {
+            let arch = if keywords.contains(&"arm64") { "arm64" }
+                       else if keywords.contains(&"386") { "386" }
+                       else { "amd64" };
+            (format!("windows_{}", arch), "zip")
         } else if keywords.contains(&"darwin") {
-            if keywords.contains(&"arm64") { "darwin_arm64" }
-            else { "darwin_amd64" }
+            let arch = if keywords.contains(&"arm64") { "arm64" } else { "amd64" };
+            (format!("darwin_{}", arch), "tar.gz")
         } else {
-            if keywords.contains(&"arm64") { "linux_arm64" }
-            else { "linux_amd64" }
+            let arch = if keywords.contains(&"arm64") { "arm64" } else { "amd64" };
+            (format!("linux_{}", arch), "tar.gz")
         };
 
         let versions = vec![
@@ -263,7 +270,10 @@ impl FrpVersionManager {
                 version: version.to_string(),
                 name: name.to_string(),
                 published_at: String::new(),
-                download_url: format!("https://github.com/fatedier/frp/releases/download/{}/frp_{}_{}.tar.gz", version, suffix, version),
+                download_url: format!(
+                    "https://github.com/fatedier/frp/releases/download/{}/frp_{}_{}.{}",
+                    version, suffix, version, ext
+                ),
                 mirror_url: None,
                 size: 0,
                 download_count: 0,
@@ -311,13 +321,14 @@ impl FrpVersionManager {
             info!("Download attempt {}/{}: {}", idx + 1, candidates.len(), candidate);
             match self.try_download(candidate, &mut progress.clone()).await {
                 Ok(data) => {
-                    // 保存压缩包
-                    let ext = if url.ends_with(".zip") { "zip" } else { "tar.gz" };
+                    // 按内容魔数决定解压方式（比 URL 后缀更可靠）
+                    let is_zip = data.starts_with(b"PK\x03\x04");
+                    let ext = if is_zip { "zip" } else { "tar.gz" };
                     let archive_path = self.install_dir.join(format!("frp_{}.{}", version, ext));
                     fs::write(&archive_path, &data)?;
 
                     // 解压
-                    let frpc_path = if ext == "zip" {
+                    let frpc_path = if is_zip {
                         self.extract_zip(&archive_path, version)?
                     } else {
                         self.extract_tar_gz(&archive_path, version)?
@@ -386,6 +397,19 @@ impl FrpVersionManager {
         if data.is_empty() {
             return Err(anyhow::anyhow!("下载内容为空"));
         }
+
+        // 内容魔数校验：防止镜像把 404/错误页 HTML 当 200 返回，
+        // 此前该场景导致解压报 "failed to iterate over archive"
+        let is_zip = data.starts_with(b"PK\x03\x04");
+        let is_gzip = data.starts_with(&[0x1f, 0x8b]);
+        if !is_zip && !is_gzip {
+            let preview = String::from_utf8_lossy(&data[..data.len().min(80)]).to_string();
+            return Err(anyhow::anyhow!(
+                "下载内容不是有效压缩包(zip/gzip 魔数不符)，疑似错误页: {}...",
+                preview.replace('\n', " ")
+            ));
+        }
+
         Ok(data)
     }
 
