@@ -1569,17 +1569,32 @@ pub fn init_app(app: &mut tauri::App) {
     // frpc 实时日志发进无人消费的通道全部蒸发，前端永远收不到。
     let (log_tx, mut log_rx) = mpsc::channel::<String>(1000);
 
-    // 消费日志并通过事件推送前端（概览页实时日志的数据源）
+    // 消费日志并通过事件推送前端（概览实时日志的数据源）
+    // 同时追加写入磁盘日志文件（"加载磁盘日志"功能的数据源）
+    // 历史修复：receiver 曾被丢弃导致日志全部蒸发
+    // 历史修复：frpc log.to 曾指向文件导致 stdout 静默，实时日志空白
     let handle = app.handle().clone();
+    let disk_log_path = config_dir.join("frpc.log"); // 与 get_frpc_log_content 读取路径一致
     tauri::async_runtime::spawn(async move {
+        use std::io::Write;
+        use tauri::Emitter;
         while let Some(line) = log_rx.recv().await {
-            use tauri::Emitter;
+            let ts = chrono::Local::now().format("%Y/%m/%d %H:%M:%S");
+            // 1. 实时推送前端
             let payload = serde_json::json!({
                 "line": line,
                 "timestamp": chrono::Utc::now().timestamp_millis(),
             });
             if handle.emit("frpc-log", payload).is_err() {
                 // 前端未监听时静默丢弃（如窗口最小化期间），不中断消费
+            }
+            // 2. 追加写磁盘（带本地时间戳，供日志查看页"加载磁盘日志"）
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&disk_log_path)
+            {
+                let _ = writeln!(f, "[{}] {}", ts, line);
             }
         }
     });

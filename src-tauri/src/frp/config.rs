@@ -358,7 +358,7 @@ impl ConfigManager {
     /// 旧版 INI 结构：
     ///   [common] 服务器连接 + 认证 + 日志
     ///   [proxy_name] 每个代理一段
-    pub fn generate_ini(&self, config: &FrpConfig, log_file_path: &str) -> Result<String> {
+    pub fn generate_ini(&self, config: &FrpConfig, _log_file_path: &str) -> Result<String> {
         let mut ini = String::new();
 
         // [common] 段（旧版所有顶层配置都在这里）
@@ -383,9 +383,11 @@ impl ConfigManager {
             ini.push_str(&format!("login_fail_exit = {}\n", v));
         }
 
-        // 日志（INI 值不加引号，反斜杠无转义问题，但统一正斜杠保持一致）
-        let log_path_normalized = log_file_path.replace('\\', "/");
-        ini.push_str(&format!("\n[log]\nto = {}\n", log_path_normalized));
+        // 日志：log.to 留空 → frpc 输出到 stdout
+        // 历史 bug：此前 to 指向文件，frpc 就不再输出 stdout，
+        // 导致概览实时日志永远空白（"暂无运行日志"）。
+        // 现由应用读 stdout 后统一：emit 前端 + 写磁盘日志文件。
+        ini.push_str("\n[log]\n");
         ini.push_str(&format!("level = {}\n", config.log.level));
         ini.push_str(&format!("max_days = {}\n", config.log.max_days));
 
@@ -425,7 +427,7 @@ impl ConfigManager {
     /// 3. 处理批量端口（模板渲染）
     /// 4. 处理 visitors
     /// 5. 处理 https2http 插件
-    pub fn generate_toml(&self, config: &FrpConfig, log_file_path: &str) -> Result<String> {
+    pub fn generate_toml(&self, config: &FrpConfig, _log_file_path: &str) -> Result<String> {
         let mut toml = String::new();
 
         // ═══ 1. 顶层键必须在任何 [section] 之前！ ═══
@@ -458,11 +460,11 @@ impl ConfigManager {
 
         // ═══ 3. 日志配置（Windows 路径必须用正斜杠！ ═══
         // TOML 基本字符串中 `\U` 是 Unicode 转义前缀，
-        // "C:\Users\..." 会导致解析失败 → frpc 报
-        // "json: cannot unmarshal string into Go value of type v1.ClientConfig"
-        let log_path_normalized = log_file_path.replace('\\', "/");
+        // 日志：log.to 留空 → frpc 输出到 stdout
+        // 历史 bug：to 指向文件导致 stdout 静默，概览实时日志永远空白。
+        // 应用读 stdout 后统一分发：emit 前端 + 写磁盘文件。
+        // （路径反斜杠转义的教训保留：若未来恢复 to 配置，必须正斜杠）
         toml.push_str("\n[log]\n");
-        toml.push_str(&format!("to = \"{}\"\n", log_path_normalized));
         toml.push_str(&format!("level = \"{}\"\n", config.log.level));
         toml.push_str(&format!("maxDays = {}\n", config.log.max_days));
 

@@ -40,6 +40,8 @@ export const useAppStore = defineStore('app', () => {
   const serverStatuses = ref<Map<string, any>>(new Map());
   const proxyStatuses = ref<Map<string, any>>(new Map());  // 代理状态
   const serverTraffic = ref<Map<string, any>>(new Map());  // 服务器流量
+  // FRP 启动时刻（全局，修复：运行时长曾存组件本地，切页即重置）
+  const frpcStartedAt = ref<number | null>(null);
   const trafficHistory = ref<any[]>([]);  // 流量历史
   const connectionHistory = ref<any[]>([]);  // 连接历史
 
@@ -161,6 +163,7 @@ export const useAppStore = defineStore('app', () => {
       servers.value = [];
       logs.value = [];
       versions.value = [];
+      frpcStartedAt.value = null;
       // 同时清空持久化数据
       await savePersistentData();
       return { success: true };
@@ -289,11 +292,13 @@ export const useAppStore = defineStore('app', () => {
     };
 
     await invoke('start_server', { serverId, config });
+    frpcStartedAt.value = Date.now();
     await refreshServerStatus(serverId);
   }
 
   async function stopServer(serverId: string) {
     await invoke('stop_server', { serverId });
+    frpcStartedAt.value = null;
     await refreshServerStatus(serverId);
   }
 
@@ -316,6 +321,7 @@ export const useAppStore = defineStore('app', () => {
     };
     
     await invoke('restart_server', { serverId, config });
+    frpcStartedAt.value = Date.now();
     await refreshServerStatus(serverId);
   }
 
@@ -499,6 +505,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function refreshProcessStatus() {
+    const wasRunning = processStatus.value.running;
     try {
       const status = await invoke<any>('get_process_status');
       processStatus.value = {
@@ -506,6 +513,15 @@ export const useAppStore = defineStore('app', () => {
         pid: status.pid,
         state: status.state,
       };
+      // 外部恢复场景：应用重启后检测到 frpc 仍在运行，
+      // 从检测时刻起算运行时长（无法得知真实启动时刻）
+      if (!wasRunning && status.running && frpcStartedAt.value === null) {
+        frpcStartedAt.value = Date.now();
+      }
+      // 进程已停止则清空启动时刻
+      if (!status.running) {
+        frpcStartedAt.value = null;
+      }
     } catch (e) { console.error('Failed to get process status:', e); }
   }
 
@@ -723,7 +739,7 @@ export const useAppStore = defineStore('app', () => {
     servers, proxies, versions, downloadedVersions, localPorts, mirrors,
     serverStatuses,
     // Getters
-    isRunning, runningServersCount, activeProxies, activeProxiesCount,
+    isRunning, frpcStartedAt, runningServersCount, activeProxies, activeProxiesCount,
     // Settings
     setTheme, setLanguage, loadSettings, saveSettings,
     setDefaultServerId,

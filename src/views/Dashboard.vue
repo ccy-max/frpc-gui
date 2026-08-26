@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, nextTick, h } from 'vue';
+import { computed, ref, onMounted, onUnmounted, nextTick, h } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter } from 'vue-router';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -15,6 +15,17 @@ const router = useRouter();
 
 const uptimeSeconds = ref(0);
 let uptimeTimer: ReturnType<typeof setInterval> | null = null;
+
+// 运行时长基于全局 store 的启动时刻计算
+// （历史 bug：时长曾存组件本地 ref，切换导航组件重挂即清零重计）
+function tickUptime() {
+  const startedAt = appStore.frpcStartedAt;
+  if (startedAt && appStore.isRunning) {
+    uptimeSeconds.value = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  } else {
+    uptimeSeconds.value = 0;
+  }
+}
 
 const stats = computed(() => [
   {
@@ -110,9 +121,9 @@ function clearLiveLogs() {
 }
 
 onMounted(async () => {
-  uptimeTimer = setInterval(() => {
-    if (appStore.isRunning) uptimeSeconds.value++;
-  }, 1000);
+  // 立即校准一次（切页回来时恢复正确时长，而非从 0 重计）
+  tickUptime();
+  uptimeTimer = setInterval(tickUptime, 1000);
 
   // 订阅后端 frpc 实时日志事件
   try {
@@ -127,12 +138,6 @@ onMounted(async () => {
 onUnmounted(() => {
   if (uptimeTimer) clearInterval(uptimeTimer);
   if (unlistenLog) unlistenLog();
-});
-
-const prevRunning = ref(appStore.isRunning);
-watch(() => appStore.isRunning, (newVal) => {
-  if (newVal !== prevRunning.value && newVal) uptimeSeconds.value = 0;
-  prevRunning.value = newVal;
 });
 </script>
 

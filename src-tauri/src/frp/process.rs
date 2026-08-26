@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use tokio::sync::mpsc;
 
 #[cfg(windows)]
@@ -398,46 +398,6 @@ impl FrpProcessManager {
         false
     }
 
-    // ==================== 连接错误检测 ====================
-
-    /// 读取日志文件尾部，检测连接错误
-    pub fn check_connection_error(&self) -> Option<String> {
-        if !self.log_file_path.exists() {
-            return None;
-        }
-
-        let start_time = *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner());
-        if start_time == -1 {
-            return None;
-        }
-
-        let file_size = std::fs::metadata(&self.log_file_path).ok()?.len();
-        if file_size == 0 {
-            return None;
-        }
-
-        let read_size = std::cmp::min(file_size, 8192) as usize;
-        let mut file = std::fs::File::open(&self.log_file_path).ok()?;
-        std::io::Seek::seek(&mut file, std::io::SeekFrom::End(-(read_size as i64))).ok()?;
-        let mut buf = vec![0u8; read_size];
-        file.read_exact(&mut buf).ok()?;
-        let content = String::from_utf8_lossy(&buf);
-        let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
-
-        // 反向扫描
-        for line in lines.iter().rev() {
-            // 先检查成功模式（如果在错误之后出现，说明已重连）
-            if FRPC_SUCCESS_PATTERNS.iter().any(|p| line.contains(*p)) {
-                return None;
-            }
-            // 检查错误模式
-            if FRPC_ERROR_PATTERNS.iter().any(|p| line.contains(*p)) {
-                return Some(line.trim().to_string());
-            }
-        }
-
-        None
-    }
 
     // ==================== 进程守护 ====================
 
