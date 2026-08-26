@@ -223,38 +223,6 @@ async function pickFile(field: string, ext: string[]) {
         </a-tab-pane>
 
         <!-- 路径 -->
-        <a-tab-pane key="paths" tab="路径">
-          <a-alert
-            type="info"
-            show-icon
-            style="margin-bottom: 16px"
-            message="路径说明"
-            description="FRP 可执行文件：请选择客户端程序 frpc.exe（勿选服务端 frps.exe）。配置文件与日志由应用按服务器自动管理，此处的配置文件/日志目录仅作记录参考。"
-          />
-          <a-form layout="vertical" :wrapper-col="{ span: 20 }">
-            <a-form-item label="FRP 可执行文件（客户端 frpc.exe）">
-              <a-input v-model:value="appStore.frpcPath" placeholder="点击右侧按钮选择 frpc.exe" readonly>
-                <template #suffix>
-                  <a-button type="link" @click="appStore.pickFrpcPath()"><FolderOpenOutlined /></a-button>
-                </template>
-              </a-input>
-            </a-form-item>
-            <a-form-item label="配置文件（自动管理）">
-              <a-input v-model:value="appStore.configPath" placeholder="点击右侧按钮选择" readonly>
-                <template #suffix>
-                  <a-button type="link" @click="appStore.pickConfigPath()"><FolderOpenOutlined /></a-button>
-                </template>
-              </a-input>
-            </a-form-item>
-            <a-form-item label="日志目录（自动管理）">
-              <a-input v-model:value="appStore.logPath" placeholder="点击右侧按钮选择" readonly>
-                <template #suffix>
-                  <a-button type="link" @click="appStore.pickLogPath()"><FolderOpenOutlined /></a-button>
-                </template>
-              </a-input>
-            </a-form-item>
-          </a-form>
-        </a-tab-pane>
 
         <!-- 高级 -->
         <a-tab-pane key="advanced" tab="高级">

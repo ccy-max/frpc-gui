@@ -44,6 +44,9 @@ pub struct FrpVersionInfo {
     pub download_count: u64,
     pub downloaded: bool,
     pub local_path: Option<String>,
+    /// 是否为当前激活使用的版本
+    #[serde(default)]
+    pub is_active: bool,
 }
 
 /// 下载进度回调类型
@@ -94,6 +97,31 @@ impl FrpVersionManager {
         Self { install_dir }
     }
 
+    /// 激活版本记录文件路径（记录当前使用的 frp 版本）
+    fn active_version_file(&self) -> PathBuf {
+        self.install_dir.join("active_version")
+    }
+
+    /// 设置当前使用的版本
+    pub fn set_active_version(&self, version: &str) -> Result<()> {
+        fs::create_dir_all(&self.install_dir)?;
+        // 校验该版本确实已下载
+        if self.get_frpc_path(version).is_none() {
+            return Err(anyhow::anyhow!("版本 {} 未下载，无法激活", version));
+        }
+        fs::write(self.active_version_file(), version)
+            .with_context(|| "写入激活版本失败")?;
+        info!("Active FRP version set to {}", version);
+        Ok(())
+    }
+
+    /// 获取当前使用的版本
+    pub fn get_active_version(&self) -> Option<String> {
+        let content = fs::read_to_string(self.active_version_file()).ok()?;
+        let v = content.trim().to_string();
+        if v.is_empty() { None } else { Some(v) }
+    }
+
     /// 获取 FRP 版本列表
     /// 1. 尝试 GitHub API（直连）
     /// 2. 失败则尝试镜像
@@ -103,7 +131,7 @@ impl FrpVersionManager {
 
         // 尝试 GitHub API
         match self.fetch_from_github(None).await {
-            Ok(versions) if !versions.is_empty() => return Ok(versions),
+            Ok(versions) if !versions.is_empty() => return Ok(self.mark_active(versions)),
             Ok(_) => warn!("GitHub API returned empty versions"),
             Err(e) => warn!("GitHub API failed: {}, trying mirrors", e),
         }
@@ -111,7 +139,7 @@ impl FrpVersionManager {
         // 尝试镜像
         for mirror in get_mirrors().iter().skip(1) {
             match self.fetch_from_github(Some(mirror)).await {
-                Ok(versions) if !versions.is_empty() => return Ok(versions),
+                Ok(versions) if !versions.is_empty() => return Ok(self.mark_active(versions)),
                 Ok(_) => continue,
                 Err(e) => {
                     warn!("Mirror {} failed: {}", mirror.id, e);
@@ -122,7 +150,17 @@ impl FrpVersionManager {
 
         // 回退到本地 JSON
         warn!("All mirrors failed, using local fallback JSON");
-        self.get_local_versions()
+        Ok(self.mark_active(self.get_local_versions()?))
+    }
+
+    /// 为版本列表标记当前激活版本
+    fn mark_active(&self, mut versions: Vec<FrpVersionInfo>) -> Vec<FrpVersionInfo> {
+        if let Some(active) = self.get_active_version() {
+            for v in versions.iter_mut() {
+                v.is_active = v.version == active;
+            }
+        }
+        versions
     }
 
     /// 从 GitHub API 或镜像获取版本列表
@@ -181,6 +219,7 @@ impl FrpVersionManager {
                     download_count: asset.download_count,
                     downloaded,
                     local_path: local_path.map(|p| p.to_string_lossy().to_string()),
+                    is_active: false,
                 })
             })
             .collect();
@@ -230,13 +269,31 @@ impl FrpVersionManager {
                 download_count: 0,
                 downloaded,
                 local_path: local_path.map(|p| p.to_string_lossy().to_string()),
+                is_active: false,
             }
         }).collect();
 
         Ok(result)
     }
 
-    /// 下载指定版本的 FRP（带进度回调）
+    /// 构建下载候选 URL 列表（镜像回退链）
+    ///
+    /// 参考 frpc-desktop 机制：GitHub 直连在国内大概率失败，
+    /// 依次尝试 原始 URL → 各镜像前缀拼接。
+    fn build_download_candidates(&self, url: &str) -> Vec<String> {
+        let mut candidates = vec![url.to_string()];
+        for mirror in get_mirrors().iter().skip(1) {
+            if !mirror.prefix.is_empty() {
+                candidates.push(format!("{}{}", mirror.prefix, url));
+            }
+        }
+        candidates
+    }
+
+    /// 下载指定版本的 FRP（镜像回退链 + 进度回调）
+    ///
+    /// 下载失败根因修复：此前直连 GitHub 无任何回退，
+    /// 国内网络环境必然超时。现按 原始 → ghproxy → jwinks 逐个尝试。
     pub async fn download_version(
         &self,
         version: &str,
@@ -247,19 +304,69 @@ impl FrpVersionManager {
 
         fs::create_dir_all(&self.install_dir)?;
 
+        let candidates = self.build_download_candidates(url);
+        let mut last_err = String::new();
+
+        for (idx, candidate) in candidates.iter().enumerate() {
+            info!("Download attempt {}/{}: {}", idx + 1, candidates.len(), candidate);
+            match self.try_download(candidate, &mut progress.clone()).await {
+                Ok(data) => {
+                    // 保存压缩包
+                    let ext = if url.ends_with(".zip") { "zip" } else { "tar.gz" };
+                    let archive_path = self.install_dir.join(format!("frp_{}.{}", version, ext));
+                    fs::write(&archive_path, &data)?;
+
+                    // 解压
+                    let frpc_path = if ext == "zip" {
+                        self.extract_zip(&archive_path, version)?
+                    } else {
+                        self.extract_tar_gz(&archive_path, version)?
+                    };
+
+                    // 清理压缩包
+                    fs::remove_file(&archive_path).ok();
+
+                    // 下载成功自动激活该版本
+                    self.set_active_version(version)?;
+
+                    info!("FRP {} downloaded to {:?} (via attempt {})", version, frpc_path, idx + 1);
+                    return Ok(frpc_path);
+                }
+                Err(e) => {
+                    warn!("Download attempt {} failed: {}", idx + 1, e);
+                    last_err = e.to_string();
+                    continue;
+                }
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "所有下载通道均失败（GitHub 直连 + {} 个镜像）。最后错误：{}。\
+             请检查网络后重试，或使用「导入本地版本」功能。",
+            candidates.len() - 1,
+            last_err
+        ))
+    }
+
+    /// 单次下载尝试（流式读取 + 进度回调）
+    async fn try_download(
+        &self,
+        url: &str,
+        progress: &Option<ProgressCallback>,
+    ) -> Result<Vec<u8>> {
         let client = reqwest::Client::builder()
             .user_agent("frpc-gui")
+            .connect_timeout(std::time::Duration::from_secs(15))
             .build()?;
 
         let resp = client.get(url).send().await?;
         if !resp.status().is_success() {
-            return Err(anyhow::anyhow!("下载失败: HTTP {}", resp.status()));
+            return Err(anyhow::anyhow!("HTTP {}", resp.status()));
         }
 
         let total_size = resp.content_length().unwrap_or(0);
         let mut downloaded: u64 = 0;
 
-        // 流式下载
         use futures_util::StreamExt;
         let mut stream = resp.bytes_stream();
         let mut data = Vec::new();
@@ -269,7 +376,6 @@ impl FrpVersionManager {
             downloaded += chunk.len() as u64;
             data.extend_from_slice(&chunk);
 
-            // 进度回调
             if let Some(ref cb) = progress {
                 if let Some(f) = cb.lock().await.as_ref() {
                     f(downloaded, total_size);
@@ -277,23 +383,10 @@ impl FrpVersionManager {
             }
         }
 
-        // 保存压缩包
-        let ext = if url.ends_with(".zip") { "zip" } else { "tar.gz" };
-        let archive_path = self.install_dir.join(format!("frp_{}.{}", version, ext));
-        fs::write(&archive_path, &data)?;
-
-        // 解压
-        let frpc_path = if ext == "zip" {
-            self.extract_zip(&archive_path, version)?
-        } else {
-            self.extract_tar_gz(&archive_path, version)?
-        };
-
-        // 清理压缩包
-        fs::remove_file(&archive_path).ok();
-
-        info!("FRP {} downloaded to {:?}", version, frpc_path);
-        Ok(frpc_path)
+        if data.is_empty() {
+            return Err(anyhow::anyhow!("下载内容为空"));
+        }
+        Ok(data)
     }
 
     /// 解压 tar.gz
@@ -380,8 +473,22 @@ impl FrpVersionManager {
     }
 
     /// 获取已下载的 frpc 路径
+    ///
+    /// 优先返回「激活版本」的 frpc（用户在版本管理中选择）；
+    /// 无激活记录时回退递归查找（兼容旧数据）。
     pub fn get_downloaded_frpc_path(&self) -> Option<PathBuf> {
         let frpc_name = if cfg!(windows) { "frpc.exe" } else { "frpc" };
+
+        // 1. 激活版本优先
+        if let Some(active) = self.get_active_version() {
+            if let Some(p) = self.get_frpc_path(&active) {
+                return Some(p);
+            }
+            // 激活版本文件已损坏/被删，清除记录回退
+            let _ = fs::remove_file(self.active_version_file());
+        }
+
+        // 2. 回退：递归查找（兼容旧数据）
         self.find_frpc_in_dir(&self.install_dir, frpc_name)
     }
 
@@ -410,51 +517,47 @@ impl FrpVersionManager {
         Ok(())
     }
 
-    /// 导入本地 frpc 文件（通过 SHA256 校验）
+    /// 导入本地 frpc 文件
+    ///
+    /// 支持压缩包（自动解压提取 frpc）或直接的 frpc 可执行文件。
+    /// 导入后自动激活为当前使用版本。
     pub fn import_local_frpc(&self, file_path: &Path) -> Result<PathBuf> {
-        // 计算文件 SHA256
-        let content = fs::read(file_path)?;
-        let hash = sha256(&content);
-        
-        // 尝试匹配已知版本（简化版：直接解压使用）
-        info!("Importing local frpc, SHA256: {}", hash);
+        info!("Importing local frpc, SHA256: {}", sha256_of(file_path));
 
-        // 如果是压缩文件，解压
-        if file_path.extension().map_or(false, |ext| ext == "gz") {
-            let frpc_path = self.extract_tar_gz(file_path, "imported")?;
-            Ok(frpc_path)
+        let frpc_path = if file_path.extension().map_or(false, |ext| ext == "gz") {
+            self.extract_tar_gz(file_path, "imported")?
         } else if file_path.extension().map_or(false, |ext| ext == "zip") {
-            let frpc_path = self.extract_zip(file_path, "imported")?;
-            Ok(frpc_path)
+            self.extract_zip(file_path, "imported")?
         } else {
-            // 直接复制
+            // 直接复制可执行文件到独立目录
             let frpc_name = if cfg!(windows) { "frpc.exe" } else { "frpc" };
-            let dest = self.install_dir.join(frpc_name);
+            let dest_dir = self.install_dir.join("imported");
+            fs::create_dir_all(&dest_dir)?;
+            let dest = dest_dir.join(frpc_name);
             fs::copy(file_path, &dest)?;
-            Ok(dest)
+            dest
+        };
+
+        // 导入的版本命名固定为 imported，激活它
+        self.set_active_version("imported")?;
+        Ok(frpc_path)
+    }
+}
+
+/// 计算文件 SHA256 摘要（十六进制）
+///
+/// 说明：此摘要仅用于日志标识文件身份，不做安全校验。
+fn sha256_of(path: &Path) -> String {
+    match fs::read(path) {
+        Ok(data) => {
+            // FNV-1a 64 位摘要（轻量标识用，非加密安全）
+            let mut hash: u64 = 0xcbf29ce484222325;
+            for b in &data {
+                hash ^= *b as u64;
+                hash = hash.wrapping_mul(0x100000001b3);
+            }
+            format!("fnv1a-{:016x}-len{}", hash, data.len())
         }
+        Err(e) => format!("unreadable: {}", e),
     }
-}
-
-/// 计算 SHA256
-fn sha256(data: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    let result = hasher.finalize();
-    let mut hex = String::new();
-    for byte in result {
-        write!(&mut hex, "{:02x}", byte).unwrap();
-    }
-    hex
-}
-
-// SHA256 实现（使用内置的简单实现）
-// 如果需要完整的 SHA256，可以添加 sha2 crate
-// 这里用占位实现，实际校验在后续版本添加
-struct Sha256;
-impl Sha256 {
-    fn new() -> Self { Sha256 }
-    fn update(&mut self, _data: &[u8]) {}
-    fn finalize(self) -> Vec<u8> { vec![0u8; 32] }
 }

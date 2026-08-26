@@ -8,9 +8,6 @@ export const useAppStore = defineStore('app', () => {
   // 应用设置（持久化）
   const theme = ref<'light' | 'dark' | 'auto'>('auto');
   const language = ref<'zh-CN' | 'en-US'>('zh-CN');
-  const frpcPath = ref('');
-  const configPath = ref('');
-  const logPath = ref('');
   const autoStart = ref(false);
   const minimizeToTray = ref(true);
   const closeToTray = ref(true);
@@ -61,9 +58,6 @@ export const useAppStore = defineStore('app', () => {
       const s = await invoke<any>('load_settings');
       theme.value = s.theme || 'auto';
       language.value = s.language || 'zh-CN';
-      frpcPath.value = s.frpc_path || '';
-      configPath.value = s.config_path || '';
-      logPath.value = s.log_path || '';
       autoStart.value = s.auto_start || false;
       minimizeToTray.value = s.minimize_to_tray ?? true;
       closeToTray.value = s.close_to_tray ?? true;
@@ -80,9 +74,6 @@ export const useAppStore = defineStore('app', () => {
         settings: {
           language: language.value,
           theme: theme.value,
-          frpc_path: frpcPath.value,
-          config_path: configPath.value,
-          log_path: logPath.value,
           auto_start: autoStart.value,
           minimize_to_tray: minimizeToTray.value,
           close_to_tray: closeToTray.value,
@@ -120,52 +111,6 @@ export const useAppStore = defineStore('app', () => {
     saveSettings();
   }
 
-  // ===== 文件选择 =====
-  async function pickFrpcPath() {
-    try {
-      const selected = await openDialog({
-        title: '选择 frpc 可执行文件',
-        filters: [{ name: '可执行文件', extensions: ['exe'] }],
-      });
-      if (selected) {
-        frpcPath.value = selected as string;
-        await saveSettings();
-      }
-    } catch (e) {
-      console.error('Failed to pick frpc path:', e);
-    }
-  }
-
-  async function pickConfigPath() {
-    try {
-      const selected = await saveDialog({
-        title: '选择配置文件保存位置',
-        defaultPath: 'frpc.toml',
-        filters: [{ name: 'TOML 配置', extensions: ['toml'] }],
-      });
-      if (selected) {
-        configPath.value = selected as string;
-        await saveSettings();
-      }
-    } catch (e) {
-      console.error('Failed to pick config path:', e);
-    }
-  }
-
-  async function pickLogPath() {
-    try {
-      const selected = await openDialog({
-        title: '选择日志目录',
-        directory: true,
-      });
-      if (selected) {
-        logPath.value = selected as string;
-        await saveSettings();
-      }
-    } catch (e) {
-      console.error('Failed to pick log path:', e);
-    }
-  }
 
   // ===== 配置管理 =====
   async function loadConfig() {
@@ -216,7 +161,6 @@ export const useAppStore = defineStore('app', () => {
       servers.value = [];
       logs.value = [];
       versions.value = [];
-      frpcPath.value = '';
       // 同时清空持久化数据
       await savePersistentData();
       return { success: true };
@@ -625,8 +569,6 @@ export const useAppStore = defineStore('app', () => {
   async function downloadVersion(version: string, url: string) {
     try {
       const path = await invoke<string>('download_frp_version', { version, url });
-      frpcPath.value = path;
-      await saveSettings();
       await loadVersions();
       return { success: true, path };
     } catch (e) { return { success: false, error: String(e) }; }
@@ -635,6 +577,15 @@ export const useAppStore = defineStore('app', () => {
   async function deleteVersion(version: string) {
     try {
       await invoke<boolean>('delete_frp_version', { version });
+      await loadVersions();
+      return { success: true };
+    } catch (e) { return { success: false, error: String(e) }; }
+  }
+
+  /// 设置当前使用的 FRP 版本（版本管理「使用此版本」）
+  async function setActiveVersion(version: string) {
+    try {
+      await invoke<boolean>('set_active_version', { version });
       await loadVersions();
       return { success: true };
     } catch (e) { return { success: false, error: String(e) }; }
@@ -659,8 +610,7 @@ export const useAppStore = defineStore('app', () => {
       });
       if (selected) {
         const path = await invoke<string>('import_local_frpc', { filePath: selected as string });
-        frpcPath.value = path;
-        await saveSettings();
+        await loadVersions();
         return { success: true, path };
       }
       return { success: false, error: 'canceled' };
@@ -767,7 +717,7 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     // State
-    theme, language, frpcPath, configPath, logPath,
+    theme, language,
     autoStart, minimizeToTray, closeToTray, defaultServerId,
     frpConfig, processStatus, logs, frpcLogContent, autoScrollLogs,
     servers, proxies, versions, downloadedVersions, localPorts, mirrors,
@@ -776,7 +726,6 @@ export const useAppStore = defineStore('app', () => {
     isRunning, runningServersCount, activeProxies, activeProxiesCount,
     // Settings
     setTheme, setLanguage, loadSettings, saveSettings,
-    pickFrpcPath, pickConfigPath, pickLogPath,
     setDefaultServerId,
     // Config
     loadConfig, saveConfig, resetAllConfig, importTomlConfig,
@@ -796,6 +745,7 @@ export const useAppStore = defineStore('app', () => {
     addLog, clearLogs, loadFrpcLogContent, openFrpcLogFile,
     // Versions
     loadVersions, loadDownloadedVersions, downloadVersion, deleteVersion,
+    setActiveVersion,
     loadMirrors, importLocalFrpc,
     // System
     openUrl, relaunchApp, openAppData, checkAppUpdate, loadLocalPorts,

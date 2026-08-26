@@ -280,6 +280,27 @@ pub async fn get_logs(_state: State<'_, AppState>) -> Result<Vec<String>, String
 
 // ==================== FRP 版本管理 ====================
 
+/// 设置当前使用的 FRP 版本（版本管理「使用此版本」）
+#[tauri::command]
+pub async fn set_active_version(version: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let vm = state.version_manager.lock().await;
+    match vm.as_ref() {
+        Some(m) => { m.set_active_version(&version).map_err(|e| e.to_string())?; Ok(true) }
+        None => Err("版本管理器未初始化".to_string()),
+    }
+}
+
+/// 获取当前使用的 FRP 版本
+#[tauri::command]
+pub async fn get_active_version(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let vm = state.version_manager.lock().await;
+    match vm.as_ref() {
+        Some(m) => Ok(m.get_active_version()),
+        None => Err("版本管理器未初始化".to_string()),
+    }
+}
+
+/// 获取 FRP 版本列表
 #[tauri::command]
 pub async fn list_frp_versions(state: State<'_, AppState>) -> Result<Vec<FrpVersionInfo>, String> {
     let vm = state.version_manager.lock().await;
@@ -665,6 +686,7 @@ pub async fn get_downloaded_versions(state: State<'_, AppState>) -> Result<Vec<F
                                 download_count: 0,
                                 downloaded: true,
                                 local_path: frpc_path.map(|p| p.to_string_lossy().to_string()),
+                                is_active: false,
                             });
                         }
                     }
@@ -868,43 +890,15 @@ pub async fn start_server(
     std::fs::write(&config_path, toml_content)
         .map_err(|e| format!("写入配置文件失败：{}", e))?;
 
-    // 获取 frpc 可执行文件路径（优先级：设置页手动指定 > 版本管理下载 > PATH 默认）
+    // 获取 frpc 可执行文件路径：由「版本管理」的激活版本决定
+    // （设置页路径选择已移除，frpc 统一由版本管理下载/导入/切换）
     #[cfg(windows)]
     let default_frpc = "frpc.exe";
     #[cfg(not(windows))]
     let default_frpc = "frpc";
 
-    // 1) 设置页手动指定的路径（历史 bug：该设置从未被使用，形同虚设）
-    let settings_frpc = {
-        let sm = state.settings_manager.lock().await;
-        sm.as_ref().and_then(|s| s.load().ok())
-            .map(|s| s.frpc_path)
-            .filter(|p| !p.is_empty())
-    };
-
-    let frpc_path = if let Some(ref p) = settings_frpc {
-        let pb = PathBuf::from(p);
-        let fname = pb.file_name()
-            .map(|n| n.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        // 防呆校验：frps.exe 是服务端程序，用它启动客户端必然失败
-        if fname.starts_with("frps") {
-            return Err(format!(
-                "设置中的 FRP 可执行文件是服务端程序（{}）。\n\
-                 请在「设置 → 路径」中选择客户端程序 frpc.exe，\
-                 或清空该设置改用版本管理下载的 frpc。",
-                p
-            ));
-        }
-        if pb.exists() {
-            p.clone()
-        } else {
-            warn!("设置中的 frpc 路径不存在: {}，回退到版本管理", p);
-            vm_fallback(&state).await.unwrap_or_else(|| default_frpc.to_string())
-        }
-    } else {
-        vm_fallback(&state).await.unwrap_or_else(|| default_frpc.to_string())
-    };
+    let frpc_path = vm_fallback(&state).await.unwrap_or_else(|| default_frpc.to_string());
+    info!("Using frpc binary: {}", frpc_path);
 
     // 获取日志通道
     let log_tx = {

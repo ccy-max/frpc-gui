@@ -98,6 +98,8 @@ pub fn run() {
             commands::list_frp_versions,
             commands::download_frp_version,
             commands::delete_frp_version,
+            commands::set_active_version,
+            commands::get_active_version,
             commands::get_mirrors,
             commands::import_local_frpc,
             commands::get_downloaded_versions,

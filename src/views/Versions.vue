@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { message, Modal } from 'ant-design-vue';
-import { ReloadOutlined, DownloadOutlined, DeleteOutlined, ImportOutlined, GlobalOutlined } from '@ant-design/icons-vue';
+import { ReloadOutlined, DownloadOutlined, DeleteOutlined, ImportOutlined, GlobalOutlined, CheckCircleOutlined } from '@ant-design/icons-vue';
 
 const appStore = useAppStore();
 const loading = ref(false);
@@ -16,8 +16,8 @@ const columns = [
     customRender: ({ text }: { text: string }) => text ? new Date(text).toLocaleDateString() : '-' },
   { title: '大小', key: 'size', width: 100,
     customRender: ({ record }: { record: any }) => record.size ? (record.size / 1048576).toFixed(1) + ' MB' : '-' },
-  { title: '状态', key: 'downloaded', width: 80 },
-  { title: '操作', key: 'action', width: 140, fixed: 'right' as const },
+  { title: '状态', key: 'downloaded', width: 90 },
+  { title: '操作', key: 'action', width: 220, fixed: 'right' as const },
 ];
 
 async function refresh() {
@@ -84,6 +84,21 @@ async function importLocal() {
   }
 }
 
+/// 切换当前使用的 frpc 版本
+async function useVersion(record: any) {
+  try {
+    const result = await appStore.setActiveVersion(record.version);
+    if (result.success) {
+      message.success(`已切换为使用 ${record.version}，启动 FRP 时将使用此版本`);
+      await refresh();
+    } else {
+      message.error(`切换失败：${result.error}`);
+    }
+  } catch (e) {
+    message.error(`切换失败：${String(e)}`);
+  }
+}
+
 function handleMirrorDownload(record: any) {
   const mirror = appStore.mirrors.find((m: any) => m.id === selectedMirror.value);
   let url = record.download_url;
@@ -138,6 +153,12 @@ onMounted(() => { refresh(); });
         size="middle"
       >
         <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'version'">
+            <span>{{ record.version }}</span>
+            <a-tag v-if="record.is_active" color="processing" style="margin-left: 8px">
+              使用中
+            </a-tag>
+          </template>
           <template v-if="column.key === 'downloaded'">
             <a-tag :color="record.downloaded ? 'green' : 'default'">
               {{ record.downloaded ? '已下载' : '未下载' }}
@@ -156,7 +177,17 @@ onMounted(() => { refresh(); });
                 下载
               </a-button>
               <a-button
-                v-else
+                v-if="record.downloaded && !record.is_active"
+                size="small"
+                type="primary"
+                ghost
+                @click="useVersion(record)"
+              >
+                <CheckCircleOutlined />
+                使用此版本
+              </a-button>
+              <a-button
+                v-if="record.downloaded"
                 size="small"
                 danger
                 @click="remove(record)"
