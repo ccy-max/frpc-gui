@@ -829,6 +829,14 @@ async fn query_admin_api<T: serde::de::DeserializeOwned>(
     Ok(data)
 }
 
+/// 从版本管理器获取已下载的 frpc 路径（回退方案）
+async fn vm_fallback(state: &State<'_, AppState>) -> Option<String> {
+    let vm = state.version_manager.lock().await;
+    vm.as_ref()
+        .and_then(|m| m.get_downloaded_frpc_path())
+        .map(|p| p.to_string_lossy().to_string())
+}
+
 /// 启动指定服务器的 FRP 进程
 #[tauri::command]
 pub async fn start_server(
@@ -860,18 +868,43 @@ pub async fn start_server(
     std::fs::write(&config_path, toml_content)
         .map_err(|e| format!("写入配置文件失败：{}", e))?;
 
-    // 获取 frpc 路径
+    // 获取 frpc 可执行文件路径（优先级：设置页手动指定 > 版本管理下载 > PATH 默认）
     #[cfg(windows)]
     let default_frpc = "frpc.exe";
     #[cfg(not(windows))]
     let default_frpc = "frpc";
 
-    let vm_guard = state.version_manager.lock().await;
-    let frpc_path = vm_guard.as_ref()
-        .and_then(|vm| vm.get_downloaded_frpc_path())
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| default_frpc.to_string());
-    drop(vm_guard);
+    // 1) 设置页手动指定的路径（历史 bug：该设置从未被使用，形同虚设）
+    let settings_frpc = {
+        let sm = state.settings_manager.lock().await;
+        sm.as_ref().and_then(|s| s.load().ok())
+            .map(|s| s.frpc_path)
+            .filter(|p| !p.is_empty())
+    };
+
+    let frpc_path = if let Some(ref p) = settings_frpc {
+        let pb = PathBuf::from(p);
+        let fname = pb.file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        // 防呆校验：frps.exe 是服务端程序，用它启动客户端必然失败
+        if fname.starts_with("frps") {
+            return Err(format!(
+                "设置中的 FRP 可执行文件是服务端程序（{}）。\n\
+                 请在「设置 → 路径」中选择客户端程序 frpc.exe，\
+                 或清空该设置改用版本管理下载的 frpc。",
+                p
+            ));
+        }
+        if pb.exists() {
+            p.clone()
+        } else {
+            warn!("设置中的 frpc 路径不存在: {}，回退到版本管理", p);
+            vm_fallback(&state).await.unwrap_or_else(|| default_frpc.to_string())
+        }
+    } else {
+        vm_fallback(&state).await.unwrap_or_else(|| default_frpc.to_string())
+    };
 
     // 获取日志通道
     let log_tx = {

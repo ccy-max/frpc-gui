@@ -206,7 +206,10 @@ impl Default for WebServerConfig {
     fn default() -> Self {
         Self {
             addr: "127.0.0.1".to_string(),
-            port: 57400,
+            // 默认禁用管理端口（port=0 时 generate_toml 不输出 [webServer] 段）。
+            // 非零默认会让每个 frpc 进程都占用一个管理端口，
+            // 多进程场景下第二个进程起不来（端口冲突）。
+            port: 0,
             user: None,
             password: None,
         }
@@ -361,63 +364,82 @@ impl ConfigManager {
     pub fn generate_toml(&self, config: &FrpConfig, log_file_path: &str) -> Result<String> {
         let mut toml = String::new();
 
-        // 1. 基本配置
+        // ═══ 1. 顶层键必须在任何 [section] 之前！ ═══
+        // TOML 规则：[section] 之后的所有键都属于该 section。
+        // 历史 bug：loginFailExit/udpPacketSize 输出在 [webServer] 之后，
+        // 被解析为 webServer 子键 → frpc 反序列化失败
         toml.push_str(&format!("serverAddr = \"{}\"\n", config.server_addr));
         toml.push_str(&format!("serverPort = {}\n", config.server_port));
-
+        if let Some(v) = config.login_fail_exit {
+            toml.push_str(&format!("loginFailExit = {}\n", v));
+        }
+        if let Some(v) = config.udp_packet_size {
+            toml.push_str(&format!("udpPacketSize = {}\n", v));
+        }
         if let Some(ref user) = config.user {
             if !user.is_empty() {
                 toml.push_str(&format!("user = \"{}\"\n", user));
             }
         }
 
-        // 2. 认证配置
-        if !config.auth.method.is_empty() && config.auth.method != "none" {
+        // ═══ 2. 认证配置（token 为空时跳过整段，避免 frpc 报 token 为空） ═══
+        let token_present = config.auth.token.as_deref().map_or(false, |t| !t.is_empty());
+        if !config.auth.method.is_empty() && config.auth.method != "none" && token_present {
             toml.push_str("\n[auth]\n");
             toml.push_str(&format!("method = \"{}\"\n", config.auth.method));
             if let Some(ref token) = config.auth.token {
-                if !token.is_empty() {
-                    toml.push_str(&format!("token = \"{}\"\n", token));
-                }
+                toml.push_str(&format!("token = \"{}\"\n", token));
             }
         }
 
-        // 3. 日志配置
+        // ═══ 3. 日志配置（Windows 路径必须用正斜杠！ ═══
+        // TOML 基本字符串中 `\U` 是 Unicode 转义前缀，
+        // "C:\Users\..." 会导致解析失败 → frpc 报
+        // "json: cannot unmarshal string into Go value of type v1.ClientConfig"
+        let log_path_normalized = log_file_path.replace('\\', "/");
         toml.push_str("\n[log]\n");
-        toml.push_str(&format!("to = \"{}\"\n", log_file_path));
+        toml.push_str(&format!("to = \"{}\"\n", log_path_normalized));
         toml.push_str(&format!("level = \"{}\"\n", config.log.level));
         toml.push_str(&format!("maxDays = {}\n", config.log.max_days));
 
-        // 4. 传输配置
+        // ═══ 4. 传输配置（所有键为 None 时跳过空段） ═══
         let t = &config.transport;
-        toml.push_str("\n[transport]\n");
-        if let Some(v) = t.dial_server_timeout { toml.push_str(&format!("dialServerTimeout = {}\n", v)); }
-        if let Some(v) = t.dial_server_keepalive { toml.push_str(&format!("dialServerKeepalive = {}\n", v)); }
-        if let Some(v) = t.pool_count { toml.push_str(&format!("poolCount = {}\n", v)); }
-        if let Some(v) = t.tcp_mux { toml.push_str(&format!("tcpMux = {}\n", v)); }
-        if let Some(v) = t.tcp_mux_keepalive_interval { toml.push_str(&format!("tcpMuxKeepaliveInterval = {}\n", v)); }
-        if let Some(ref v) = t.protocol { toml.push_str(&format!("protocol = \"{}\"\n", v)); }
-        if let Some(ref v) = t.heartbeat_interval { toml.push_str(&format!("heartbeatInterval = {}\n", v)); }
-        if let Some(ref v) = t.heartbeat_timeout { toml.push_str(&format!("heartbeatTimeout = {}\n", v)); }
+        let has_transport = t.dial_server_timeout.is_some() || t.dial_server_keepalive.is_some()
+            || t.pool_count.is_some() || t.tcp_mux.is_some()
+            || t.tcp_mux_keepalive_interval.is_some() || t.protocol.is_some()
+            || t.heartbeat_interval.is_some() || t.heartbeat_timeout.is_some();
+        if has_transport {
+            toml.push_str("\n[transport]\n");
+            if let Some(v) = t.dial_server_timeout { toml.push_str(&format!("dialServerTimeout = {}\n", v)); }
+            if let Some(v) = t.dial_server_keepalive { toml.push_str(&format!("dialServerKeepalive = {}\n", v)); }
+            if let Some(v) = t.pool_count { toml.push_str(&format!("poolCount = {}\n", v)); }
+            if let Some(v) = t.tcp_mux { toml.push_str(&format!("tcpMux = {}\n", v)); }
+            if let Some(v) = t.tcp_mux_keepalive_interval { toml.push_str(&format!("tcpMuxKeepaliveInterval = {}\n", v)); }
+            if let Some(ref v) = t.protocol { toml.push_str(&format!("protocol = \"{}\"\n", v)); }
+            if let Some(ref v) = t.heartbeat_interval { toml.push_str(&format!("heartbeatInterval = {}\n", v)); }
+            if let Some(ref v) = t.heartbeat_timeout { toml.push_str(&format!("heartbeatTimeout = {}\n", v)); }
+        }
 
-        // 5. TLS 配置
+        // ═══ 5. TLS 配置 ═══
         if config.tls.enable {
             toml.push_str("\n[transport.tls]\n");
             toml.push_str("enable = true\n");
-            if let Some(ref v) = config.tls.cert_file { toml.push_str(&format!("certFile = \"{}\"\n", v)); }
-            if let Some(ref v) = config.tls.key_file { toml.push_str(&format!("keyFile = \"{}\"\n", v)); }
-            if let Some(ref v) = config.tls.trusted_ca_file { toml.push_str(&format!("trustedCaFile = \"{}\"\n", v)); }
+            if let Some(ref v) = config.tls.cert_file { toml.push_str(&format!("certFile = \"{}\"\n", v.replace('\\', "/"))); }
+            if let Some(ref v) = config.tls.key_file { toml.push_str(&format!("keyFile = \"{}\"\n", v.replace('\\', "/"))); }
+            if let Some(ref v) = config.tls.trusted_ca_file { toml.push_str(&format!("trustedCaFile = \"{}\"\n", v.replace('\\', "/"))); }
         }
 
-        // 6. Web Server 配置
-        toml.push_str("\n[webServer]\n");
-        toml.push_str(&format!("addr = \"{}\"\n", config.web_server.addr));
-        toml.push_str(&format!("port = {}\n", config.web_server.port));
-        if let Some(ref v) = config.web_server.user {
-            if !v.is_empty() { toml.push_str(&format!("user = \"{}\"\n", v)); }
-        }
-        if let Some(ref v) = config.web_server.password {
-            if !v.is_empty() { toml.push_str(&format!("password = \"{}\"\n", v)); }
+        // ═══ 6. Web Server（仅显式配置 port > 0 时输出，避免 frpc 无谓占用管理端口） ═══
+        if config.web_server.port > 0 {
+            toml.push_str("\n[webServer]\n");
+            toml.push_str(&format!("addr = \"{}\"\n", config.web_server.addr));
+            toml.push_str(&format!("port = {}\n", config.web_server.port));
+            if let Some(ref v) = config.web_server.user {
+                if !v.is_empty() { toml.push_str(&format!("user = \"{}\"\n", v)); }
+            }
+            if let Some(ref v) = config.web_server.password {
+                if !v.is_empty() { toml.push_str(&format!("password = \"{}\"\n", v)); }
+            }
         }
 
         // 7. Metadatas
@@ -430,15 +452,8 @@ impl ConfigManager {
             }
         }
 
-        // 8. loginFailExit
-        if let Some(v) = config.login_fail_exit {
-            toml.push_str(&format!("\nloginFailExit = {}\n", v));
-        }
-
-        // 9. udpPacketSize
-        if let Some(v) = config.udp_packet_size {
-            toml.push_str(&format!("udpPacketSize = {}\n", v));
-        }
+        // 8/9. loginFailExit 与 udpPacketSize 已移至文件头部顶层键区域
+        //（TOML 规则：[section] 之后的键属于该 section，顶层键必须前置）
 
         // 10. 启用的普通代理（排除批量端口和 visitors）
         let enabled_proxies: Vec<&ProxyConfig> = config.proxies.iter()
