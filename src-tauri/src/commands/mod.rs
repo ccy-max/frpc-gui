@@ -151,8 +151,7 @@ pub struct ProcessStatusResponse {
 #[deprecated(note = "请使用 start_server 代替")]
 #[tauri::command]
 pub async fn start_frp(config: FrpConfig, state: State<'_, AppState>) -> Result<bool, String> {
-    // 临时实现：启动第一个服务器
-    use std::collections::hash_map::RandomState;
+    // 临时实现：启动默认服务器
     let server_id = "default".to_string();
     start_server(server_id, config, state).await
 }
