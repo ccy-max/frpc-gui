@@ -690,7 +690,14 @@ export const useAppStore = defineStore('app', () => {
         }
       });
     } catch (e) {
+      // 持久化失败必须让用户感知（历史 bug：静默吞错导致数据丢失无感知）
       console.error('Failed to save persistent data:', e);
+      addLog({
+        timestamp: Date.now(),
+        level: 'error',
+        message: `⚠️ 数据保存失败，重启后可能丢失：${String(e)}`,
+        source: 'app',
+      });
     }
   }
 

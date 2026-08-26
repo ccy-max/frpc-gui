@@ -724,16 +724,48 @@ pub fn load_persistent_data() -> Result<PersistentData, String> {
         .map_err(|e| format!("解析持久化数据失败：{}", e))
 }
 
-/// 保存持久化的服务器和代理数据
+/// 保存持久化的服务器和代理数据（创建父目录 + 原子写入）
+///
+/// 修复历史 bug：此前直接 fs::write，首次运行时
+/// %APPDATA%/frpc-gui/ 目录不存在导致 NotFound，
+/// 数据从未落盘且前端静默吞错（表现为"代理配置不持久化"）。
 #[tauri::command]
 pub fn save_persistent_data(data: PersistentData) -> Result<bool, String> {
     let path = get_persistent_data_path()?;
     let content = serde_json::to_string_pretty(&data)
         .map_err(|e| format!("序列化持久化数据失败：{}", e))?;
-    std::fs::write(&path, content)
-        .map_err(|e| format!("保存持久化数据失败：{}", e))?;
-    info!("Persistent data saved to {:?}", path);
+    write_atomic(&path, &content)?;
+    info!("Persistent data saved atomically to {:?}", path);
     Ok(true)
+}
+
+/// 原子写入文本文件：自动创建父目录，临时文件 + rename
+///
+/// 供 save_persistent_data / save_monitoring_data 等所有持久化点复用，
+/// 保证：① 目录不存在时自动创建；② 崩溃/断电不损坏已有数据。
+pub(crate) fn write_atomic(path: &std::path::Path, content: &str) -> Result<(), String> {
+    use std::fs;
+
+    // 1. 确保父目录存在（首次运行必需）
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("创建目录 {:?} 失败：{}", parent, e))?;
+    }
+
+    // 2. 写入同目录临时文件
+    let temp_path = path.with_extension("tmp");
+    fs::write(&temp_path, content)
+        .map_err(|e| format!("写入临时文件 {:?} 失败：{}", temp_path, e))?;
+
+    // 3. 原子重命名覆盖目标
+    fs::rename(&temp_path, path)
+        .map_err(|e| format!("替换文件 {:?} 失败：{}", path, e))?;
+
+    // 4. 防御性清理残留临时文件
+    if temp_path.exists() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    Ok(())
 }
 
 // ==================== 多 FRP 进程支持 ====================
@@ -1454,34 +1486,12 @@ fn load_monitoring_data() -> Result<MonitoringData, String> {
         .map_err(|e| format!("反序列化监控数据失败：{}", e))
 }
 
-/// 保存监控数据（原子写入）
+/// 保存监控数据（原子写入，复用 write_atomic）
 fn save_monitoring_data(data: &MonitoringData) -> Result<(), String> {
     let path = get_monitoring_data_path()?;
-    
-    // 确保父目录存在
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("创建目录失败：{}", e))?;
-    }
-    
-    // 序列化为 JSON
     let content = serde_json::to_string_pretty(data)
         .map_err(|e| format!("序列化监控数据失败：{}", e))?;
-    
-    // 写入临时文件（原子操作第一步）
-    let temp_path = path.with_extension("json.tmp");
-    std::fs::write(&temp_path, &content)
-        .map_err(|e| format!("写入临时文件失败：{}", e))?;
-    
-    // 原子重命名（确保要么完整写入，要么不变）
-    std::fs::rename(&temp_path, &path)
-        .map_err(|e| format!("重命名文件失败：{}", e))?;
-    
-    // 清理可能存在的旧临时文件（忽略错误）
-    if temp_path.exists() {
-        let _ = std::fs::remove_file(&temp_path);
-    }
-    
+    write_atomic(&path, &content)?;
     info!("Monitoring data saved atomically to {:?}", path);
     Ok(())
 }
@@ -1517,4 +1527,59 @@ pub fn init_app(app: &mut tauri::App) {
     app.manage(app_state);
 
     info!("Application initialized with multi-process support");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 回归测试：持久化目录不存在时必须自动创建并成功写入
+    /// （历史 bug：首次运行 %APPDATA%/frpc-gui/ 不存在 → NotFound → 数据静默丢失）
+    #[test]
+    fn test_write_atomic_creates_missing_dirs() {
+        let dir = std::env::temp_dir().join(format!(
+            "frpc_gui_test_{}_a/b/c",
+            std::process::id()
+        ));
+        let path = dir.join("data.json");
+        let _ = std::fs::remove_dir_all(dir.join("a")); // 确保初始不存在
+
+        write_atomic(&path, r#"{"servers":[],"proxies":[]}"#)
+            .expect("目录不存在时写入必须自动创建目录并成功");
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("proxies"));
+        // 临时文件不应残留
+        assert!(!path.with_extension("tmp").exists());
+        let _ = std::fs::remove_dir_all(dir.join("a"));
+    }
+
+    /// 原子写入应覆盖已有内容且不损坏
+    #[test]
+    fn test_write_atomic_overwrites_existing() {
+        let dir = std::env::temp_dir().join(format!(
+            "frpc_gui_test_{}_b",
+            std::process::id()
+        ));
+        let path = dir.join("data.json");
+        let _ = std::fs::create_dir_all(&dir);
+
+        write_atomic(&path, "v1").unwrap();
+        write_atomic(&path, "v2").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "v2");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PersistentData 默认值序列化往返
+    #[test]
+    fn test_persistent_data_roundtrip() {
+        let data = PersistentData {
+            servers: vec![serde_json::json!({"id": "1", "name": "s1"})],
+            proxies: vec![serde_json::json!({"name": "p1", "local_port": "8080"})],
+        };
+        let json = serde_json::to_string(&data).unwrap();
+        let back: PersistentData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.servers.len(), 1);
+        assert_eq!(back.proxies.len(), 1);
+    }
 }
