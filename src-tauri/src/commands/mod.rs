@@ -360,10 +360,24 @@ pub async fn reset_all_config(state: State<'_, AppState>) -> Result<bool, String
         .map(|d| d.join("frpc-gui"))
         .unwrap_or_else(|| PathBuf::from("."));
 
-    // 3. 清空配置文件
+    // 3. 清空配置文件（旧版单文件路径，兼容清理）
     let config_path = config_dir.join("frpc.json");
     if config_path.exists() {
         std::fs::remove_file(&config_path).map_err(|e| e.to_string())?;
+    }
+
+    // 3.1 清空多进程架构产物：每服务器配置目录
+    let servers_dir = config_dir.join("servers");
+    if servers_dir.exists() {
+        std::fs::remove_dir_all(&servers_dir).map_err(|e| e.to_string())?;
+    }
+
+    // 3.2 清空服务器/代理持久化数据与监控历史
+    for stale in ["frpc-gui-data.json", "monitoring-data.json"] {
+        let p = config_dir.join(stale);
+        if p.exists() {
+            std::fs::remove_file(&p).map_err(|e| e.to_string())?;
+        }
     }
 
     // 4. 清空下载目录

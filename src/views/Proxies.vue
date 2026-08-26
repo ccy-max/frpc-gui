@@ -182,8 +182,22 @@ function handleDelete(proxy: any) {
 }
 
 async function toggleProxy(proxy: any) {
-  await appStore.modifyProxyStatus(proxy.name, !proxy.enabled);
-  message.info(proxy.enabled ? '已停止' : '已启动');
+  const target = !proxy.enabled;
+  try {
+    // 1. 更新并持久化代理启用状态
+    await appStore.updateProxy(proxy.name, { enabled: target });
+    // 2. 若所属服务器进程运行中，热重启使配置立即生效
+    const restarted = proxy.server_id
+      ? await appStore.restartServerIfRunning(proxy.server_id)
+      : false;
+    if (restarted) {
+      message.success(`已${target ? '启用' : '停用'} ${proxy.name}，服务器已热重启生效`);
+    } else {
+      message.info(`已${target ? '启用' : '停用'} ${proxy.name}（服务器下次启动时生效）`);
+    }
+  } catch (e) {
+    message.error(`操作失败：${typeof e === 'string' ? e : (e as Error)?.message ?? String(e)}`);
+  }
 }
 
 // ===== 批量操作 =====

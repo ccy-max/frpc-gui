@@ -183,14 +183,16 @@ export const useAppStore = defineStore('app', () => {
 
   async function saveConfig(config: FrpConfig) {
     try {
-      // 转换端口为字符串（frpc TOML 期望字符串）
+      // 字段类型对齐后端 FrpConfig：
+      // - server_port 是 u16（数字），不能转字符串（历史 bug：String 会被 serde 拒绝）
+      // - proxies 的 local_port/remote_port 是 Option<String>，统一字符串化
       const configToSave = {
         ...config,
-        server_port: String(config.server_port),
+        server_port: Number(config.server_port) || 0,
         proxies: config.proxies?.map(p => ({
           ...p,
-          local_port: p.local_port ? String(p.local_port) : undefined,
-          remote_port: p.remote_port ? String(p.remote_port) : undefined,
+          local_port: p.local_port != null ? String(p.local_port) : null,
+          remote_port: p.remote_port != null ? String(p.remote_port) : null,
         })) || [],
       };
       const result = await invoke<any>('save_config', { config: configToSave });
@@ -228,8 +230,14 @@ export const useAppStore = defineStore('app', () => {
       });
       if (selected) {
         const config = await invoke<any>('import_toml_config', { tomlPath: selected as string });
+        // TOML 文件无 enabled 字段（serde 默认 false），若不修正
+        // 导入的代理会被 generate_toml 的 enabled 过滤器全部跳过——
+        // 表现为"导入成功但代理永不生效"
+        config.proxies = (config.proxies || []).map((p: any) => ({ ...p, enabled: true }));
         frpConfig.value = config;
-        proxies.value = config.proxies || [];
+        proxies.value = config.proxies;
+        // 持久化到 frpc-gui-data.json，重启后不丢失
+        await savePersistentData();
         return { success: true };
       }
       return { success: false, error: 'canceled' };
@@ -440,6 +448,17 @@ export const useAppStore = defineStore('app', () => {
   // 获取服务器的流量
   function getServerTraffic(serverId: string): any {
     return serverTraffic.value.get(serverId);
+  }
+
+  /// 若指定服务器的 FRP 进程正在运行则热重启（使代理变更生效），
+  /// 未运行则跳过。返回是否执行了重启。
+  async function restartServerIfRunning(serverId: string): Promise<boolean> {
+    const status = serverStatuses.value.get(serverId);
+    if (status?.running) {
+      await restartServer(serverId);
+      return true;
+    }
+    return false;
   }
 
   // 格式化流量显示
@@ -765,7 +784,7 @@ export const useAppStore = defineStore('app', () => {
     startServer, stopServer, restartServer, refreshServerStatus,
     // Monitoring
     refreshProxyStatus, refreshServerTraffic, getProxyStatus, getServerTraffic, formatTraffic,
-    loadTrafficHistory, loadConnectionHistory,
+    loadTrafficHistory, loadConnectionHistory, restartServerIfRunning,
     // Persistence
     savePersistentData, loadPersistentData,
     // Process
