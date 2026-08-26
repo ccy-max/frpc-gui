@@ -287,23 +287,52 @@ export const useAppStore = defineStore('app', () => {
   async function startServer(serverId: string) {
     const server = servers.value.find(s => s.id === serverId);
     if (!server) throw new Error('服务器不存在');
-    
-    // 获取该服务器的所有代理
-    const serverProxies = proxies.value.filter(p => p.server_id === serverId);
-    
-    // 构建配置
-    const config = {
-      serverAddr: server.serverAddr,
-      serverPort: server.serverPort,
-      token: server.token,
-      tlsEnable: server.tlsEnable,
-      proxies: serverProxies.map(p => ({
+
+    // 获取该服务器的所有代理，端口统一字符串化（后端 Option<String>）
+    const serverProxies = proxies.value
+      .filter(p => p.server_id === serverId)
+      .map(p => ({
         ...p,
-        local_port: String(p.local_port),
-        remote_port: String(p.remote_port),
-      })),
+        local_port: p.local_port != null ? String(p.local_port) : null,
+        remote_port: p.remote_port != null ? String(p.remote_port) : null,
+      }));
+
+    // 构建完整 FrpConfig —— 字段名必须与后端 Rust 结构 snake_case 严格一致
+    // （FrpConfig 无 rename_all，驼峰字段会被 serde 静默丢弃导致反序列化失败）
+    const config = {
+      // 必填：服务器地址与端口
+      server_addr: String(server.serverAddr ?? ''),
+      server_port: Number(server.serverPort ?? 7000),
+      user: null,
+      // 认证：generate_toml 从 auth.method/auth.token 读取，
+      // 顶层 token 字段会被丢弃，必须放对位置
+      auth: {
+        method: server.token ? 'token' : 'none',
+        token: server.token || null,
+        additional: null,
+      },
+      tls: {
+        enable: !!server.tlsEnable,
+        cert_file: null,
+        key_file: null,
+        trusted_ca_file: null,
+      },
+      log: { level: 'info', max_days: 7 },
+      admin: {
+        addr: '127.0.0.1',
+        port: 7400,
+        user: 'admin',
+        password: 'admin',
+      },
+      transport: {},
+      web_server: { addr: '127.0.0.1', port: 0, user: null, password: null },
+      metadatas: null,
+      login_fail_exit: false,
+      udp_packet_size: 1500,
+      proxies: serverProxies,
+      visitors: [],
     };
-    
+
     await invoke('start_server', { serverId, config });
     await refreshServerStatus(serverId);
   }
@@ -441,15 +470,37 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // ===== FRP 进程控制 =====
+  /// 防御性归一化：端口字段统一字符串化（后端 ProxyConfig 为 Option<String>），
+  /// 并深拷贝避免直接修改 store 状态
+  function normalizeFrpConfig(raw: any): any {
+    const cfg = JSON.parse(JSON.stringify(raw));
+    if (Array.isArray(cfg.proxies)) {
+      cfg.proxies = cfg.proxies.map((p: any) => ({
+        ...p,
+        local_port: p.local_port != null ? String(p.local_port) : null,
+        remote_port: p.remote_port != null ? String(p.remote_port) : null,
+      }));
+    }
+    if (Array.isArray(cfg.visitors)) {
+      cfg.visitors = cfg.visitors.map((p: any) => ({
+        ...p,
+        local_port: p.local_port != null ? String(p.local_port) : null,
+        remote_port: p.remote_port != null ? String(p.remote_port) : null,
+        bind_port: p.bind_port != null ? Number(p.bind_port) : null,
+      }));
+    }
+    return cfg;
+  }
+
   async function startFRP() {
     if (!frpConfig.value) return { success: false, error: '没有配置' };
     try {
-      await invoke<boolean>('start_frp', { config: frpConfig.value });
+      await invoke<boolean>('start_frp', { config: normalizeFrpConfig(frpConfig.value) });
       await refreshProcessStatus();
       addLog({ timestamp: Date.now(), level: 'info', message: 'FRP 进程已启动', source: 'app' });
       return { success: true };
     } catch (e) {
-      addLog({ timestamp: Date.now(), level: 'error', message: `启动 FRP 失败：${e}`, source: 'app' });
+      addLog({ timestamp: Date.now(), level: 'error', message: `启动 FRP 失败：${String(e)}`, source: 'app' });
       return { success: false, error: String(e) };
     }
   }
@@ -466,7 +517,7 @@ export const useAppStore = defineStore('app', () => {
   async function restartFRP() {
     if (!frpConfig.value) return { success: false, error: '没有配置' };
     try {
-      await invoke<boolean>('restart_frp', { config: frpConfig.value });
+      await invoke<boolean>('restart_frp', { config: normalizeFrpConfig(frpConfig.value) });
       await refreshProcessStatus();
       return { success: true };
     } catch (e) { return { success: false, error: String(e) }; }

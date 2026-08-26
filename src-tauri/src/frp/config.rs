@@ -11,6 +11,29 @@ use std::path::{Path, PathBuf};
 
 // ==================== 配置结构定义 ====================
 
+/// 端口/字符串字段灵活反序列化：兼容 number 与 string
+///
+/// 背景：前端 UI（a-input-number）与旧版持久化数据可能将端口存为数字，
+/// 而内部表示为 Option<String>。此反序列化器统一收敛，杜绝
+/// `invalid type: integer 8081, expected a string` 类错误。
+fn deserialize_string_flexible<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::String(s) => Ok(Some(s)),
+        serde_json::Value::Number(n) => Ok(Some(n.to_string())),
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Bool(b) => Ok(Some(b.to_string())),
+        other => Err(Error::custom(format!(
+            "期望字符串或数字，实际: {}",
+            other
+        ))),
+    }
+}
+
 /// FRP 完整配置结构（内部表示，包含 UI 状态字段）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrpConfig {
@@ -63,13 +86,26 @@ impl Default for FrpConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
     pub method: String,
     #[serde(default)]
     pub token: Option<String>,
     #[serde(default)]
     pub additional: Option<String>,
+}
+
+impl Default for AuthConfig {
+    /// 默认使用 token 认证。
+    /// 注意：不能用 derive(Default)——那会使 method 为空串，
+    /// 导致 generate_toml 跳过整个 [auth] 段，frpc 连接服务器时认证失败。
+    fn default() -> Self {
+        Self {
+            method: "token".to_string(),
+            token: None,
+            additional: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,9 +221,9 @@ pub struct ProxyConfig {
     pub proxy_type: String,
     #[serde(default)]
     pub local_ip: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_flexible")]
     pub local_port: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_flexible")]
     pub remote_port: Option<String>,
     #[serde(default)]
     pub custom_domains: Option<Vec<String>>,
@@ -877,5 +913,70 @@ mod tests {
     fn config_manager_test_generate(config: &FrpConfig) -> String {
         let cm = ConfigManager::new(PathBuf::from("/tmp/test_config.json"));
         cm.generate_toml(config, "/tmp/frpc.log").unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod regression_tests {
+    //! 启动失败回归测试：invalid type: integer 8081, expected a string
+    use super::*;
+
+    /// 复现故障场景：前端传 number 类型的端口，后端必须能反序列化
+    #[test]
+    fn test_proxy_port_as_integer_deserializes() {
+        let json = r#"{
+            "name": "web",
+            "type": "tcp",
+            "local_port": 8081,
+            "remote_port": 8081
+        }"#;
+        let proxy: ProxyConfig = serde_json::from_str(json)
+            .expect("integer 端口必须能被反序列化为 Option<String>");
+        assert_eq!(proxy.local_port.as_deref(), Some("8081"));
+        assert_eq!(proxy.remote_port.as_deref(), Some("8081"));
+    }
+
+    /// 字符串端口仍然正常
+    #[test]
+    fn test_proxy_port_as_string_deserializes() {
+        let json = r#"{ "name":"web", "type":"tcp", "local_port":"8080", "remote_port":"80" }"#;
+        let proxy: ProxyConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(proxy.local_port.as_deref(), Some("8080"));
+    }
+
+    /// 完整 FrpConfig：snake_case + 数字端口 + camelCase 不应混入
+    #[test]
+    fn test_full_config_with_numeric_ports() {
+        let json = r#"{
+            "server_addr": "192.168.1.100",
+            "server_port": 7000,
+            "auth": { "method": "token", "token": "abc123" },
+            "tls": { "enable": false },
+            "proxies": [
+                { "name":"ssh", "type":"tcp", "local_ip":"127.0.0.1",
+                  "local_port": 22, "remote_port": 6000, "enabled": true }
+            ]
+        }"#;
+        let config: FrpConfig = serde_json::from_str(json)
+            .expect("完整配置含数字端口必须可反序列化");
+        assert_eq!(config.server_addr, "192.168.1.100");
+        assert_eq!(config.proxies[0].local_port.as_deref(), Some("22"));
+        // generate_toml 必须包含认证段与正确端口
+        let cm = ConfigManager::new(PathBuf::from("/tmp/x.json"));
+        let toml = cm.generate_toml(&config, "/tmp/frpc.log").unwrap();
+        assert!(toml.contains(r#"method = "token""#), "TOML 缺少 auth.method");
+        assert!(toml.contains(r#"token = "abc123""#), "TOML 缺少 token");
+        assert!(toml.contains("localPort = \"22\"") || toml.contains("22"),
+            "TOML 应包含本地端口 22");
+    }
+
+    /// startServer 历史故障：驼峰字段缺失 server_addr 必须报明确错误而非静默
+    #[test]
+    fn test_camel_case_config_fails_loudly() {
+        // 旧版前端传驼峰 → server_addr 缺失 → 必须是 Err 而非 panic/静默默认
+        let json = r#"{ "serverAddr": "x", "serverPort": 7000 }"#;
+        let result: Result<FrpConfig, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "缺必填字段必须报错");
+        assert!(result.unwrap_err().to_string().contains("server_addr"));
     }
 }

@@ -32,13 +32,22 @@ function getServerStatus(serverId: string): any {
   return appStore.serverStatuses.get(serverId);
 }
 
+// 统一格式化 Tauri invoke 错误：
+// 后端 Result<T, String> 失败时 reject 的是 string 而非 Error 对象，
+// 直接取 .message 会得到 undefined（历史 bug：显示"启动失败：undefined"）
+function formatError(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message;
+  try { return JSON.stringify(e); } catch { return String(e); }
+}
+
 // 启动服务器
 async function startServer(server: any) {
   try {
     await appStore.startServer(server.id);
     message.success(`服务器 ${server.name} 已启动`);
-  } catch (e: any) {
-    message.error(`启动失败：${e.message}`);
+  } catch (e) {
+    message.error(`启动失败：${formatError(e)}`);
   }
 }
 
@@ -47,8 +56,8 @@ async function stopServer(server: any) {
   try {
     await appStore.stopServer(server.id);
     message.success(`服务器 ${server.name} 已停止`);
-  } catch (e: any) {
-    message.error(`停止失败：${e.message}`);
+  } catch (e) {
+    message.error(`停止失败：${formatError(e)}`);
   }
 }
 
@@ -57,8 +66,8 @@ async function restartServer(server: any) {
   try {
     await appStore.restartServer(server.id);
     message.success(`服务器 ${server.name} 已重启`);
-  } catch (e: any) {
-    message.error(`重启失败：${e.message}`);
+  } catch (e) {
+    message.error(`重启失败：${formatError(e)}`);
   }
 }
 
