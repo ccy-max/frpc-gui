@@ -1,21 +1,30 @@
 //! FRPC GUI - FRP 内网穿透桌面管理应用
 
+// 预留功能/兼容层允许保留：导入导出、热重载、状态枚举变体等
+// 当前未接前端但保留供后续启用，不应触发 dead_code 警告
+#![allow(dead_code)]
+
 mod commands;
 mod frp;
 mod utils;
 
 use log::info;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use tauri::Manager;
+
+// Windows 下 Command::creation_flags 需要 CommandExt trait 在作用域内
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 /// 应用退出时清理所有 frpc 子进程（含孤儿），避免退出后进程残留
 fn kill_all_frpc_on_exit(app: &tauri::AppHandle) {
     info!("App exiting, cleaning up frpc subprocesses");
 
-    let config_dir = dirs::config_dir()
-        .map(|d| d.join("frpc-gui"))
-        .unwrap_or_else(|| PathBuf::from("."));
+    // 用 app.path() 获取配置目录（与 init_app 一致，而非 dirs::config_dir()）
+    let config_dir = app.path().app_config_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("frpc-gui");
 
     // 扫描 servers/*/frpc.pid，按记录的 PID 精准终止（覆盖应用重启后的孤儿）
     let servers_dir = config_dir.join("servers");

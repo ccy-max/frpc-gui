@@ -217,7 +217,6 @@ pub struct ProcessStatusResponse {
     pub last_start_time: Option<i64>,
 }
 
-#[deprecated(note = "请使用 start_server 代替")]
 #[tauri::command]
 pub async fn start_frp(config: FrpConfig, state: State<'_, AppState>) -> Result<bool, String> {
     // 临时实现：启动默认服务器
@@ -225,19 +224,16 @@ pub async fn start_frp(config: FrpConfig, state: State<'_, AppState>) -> Result<
     start_server(server_id, config, state).await
 }
 
-#[deprecated(note = "请使用 stop_server 代替")]
 #[tauri::command]
 pub async fn stop_frp(state: State<'_, AppState>) -> Result<bool, String> {
     stop_server("default".to_string(), state).await
 }
 
-#[deprecated(note = "请使用 restart_server 代替")]
 #[tauri::command]
 pub async fn restart_frp(config: FrpConfig, state: State<'_, AppState>) -> Result<bool, String> {
     restart_server("default".to_string(), config, state).await
 }
 
-#[deprecated(note = "请使用 get_server_status 代替")]
 #[tauri::command]
 pub async fn get_process_status(state: State<'_, AppState>) -> Result<ProcessStatusResponse, String> {
     let status = get_server_status("default".to_string(), state).await?;
@@ -250,20 +246,17 @@ pub async fn get_process_status(state: State<'_, AppState>) -> Result<ProcessSta
     })
 }
 
-#[deprecated(note = "请使用新的多进程 API")]
 #[tauri::command]
 pub async fn detect_frpc_process(_state: State<'_, AppState>) -> Result<bool, String> {
     // 简化实现
     Ok(false)
 }
 
-#[deprecated(note = "请使用新的多进程 API")]
 #[tauri::command]
 pub async fn reload_frp(config: FrpConfig, state: State<'_, AppState>) -> Result<bool, String> {
     restart_server("default".to_string(), config, state).await
 }
 
-#[deprecated(note = "请使用新的多进程 API")]
 #[tauri::command]
 pub async fn modify_proxy_status(
     _proxy_name: String,

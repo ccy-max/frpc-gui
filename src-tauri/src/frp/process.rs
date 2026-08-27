@@ -37,8 +37,6 @@ pub struct FrpProcessManager {
     config_path: PathBuf,
     log_file_path: PathBuf,
     last_start_time: Arc<Mutex<i64>>,
-    last_recovery_time: Arc<Mutex<i64>>,
-    last_notify_time: Arc<Mutex<i64>>,
     recovery_checking: Arc<AtomicBool>,
     /// 该进程的 Admin API 端点 (addr, port, user, password)，启动时从配置快照
     admin_endpoint: std::sync::Mutex<Option<crate::frp::config::AdminConfig>>,
@@ -61,8 +59,6 @@ impl FrpProcessManager {
             config_path,
             log_file_path,
             last_start_time: Arc::new(Mutex::new(-1)),
-            last_recovery_time: Arc::new(Mutex::new(-1)),
-            last_notify_time: Arc::new(Mutex::new(-1)),
             recovery_checking: Arc::new(AtomicBool::new(false)),
             admin_endpoint: std::sync::Mutex::new(None),
             server_id: std::sync::Mutex::new(None),
