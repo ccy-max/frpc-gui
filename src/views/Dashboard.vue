@@ -3,26 +3,20 @@
  * 概览页
  *
  * 运行时长：基于全局 store 的 frpcStartedAt（后端权威时间戳同步），切页不重置
- * 实时日志：缓冲在全局 store.liveLogs，切页保留；挂载时若为空从磁盘日志预填
+ * 代理请求：从 Admin API 轮询获取（proxyStatuses + serverTraffic），5s 自动刷新
  */
-import { computed, ref, onMounted, onUnmounted, nextTick, h } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter } from 'vue-router';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   PlusOutlined, PlayCircleOutlined, PauseCircleOutlined,
   FileTextOutlined, SettingOutlined, ReloadOutlined, ClockCircleOutlined,
+  ArrowDownOutlined, ArrowUpOutlined,
 } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
 
 const appStore = useAppStore();
 const router = useRouter();
-
-const autoScroll = ref(true);
-const logTerminalRef = ref<HTMLElement | null>(null);
-let unlistenLog: UnlistenFn | null = null;
-
-const MAX_LOG_LINES = 500;
 
 // 运行状态计算（基于默认服务器的实时状态）
 const status = computed(() => {
@@ -90,17 +84,42 @@ function tickUptime() {
   }
 }
 
-const recentLogs = computed(() => appStore.liveLogs);
+// 代理请求信息（从 Admin API 轮询数据构建，替代旧的 frpc stdout 日志）
+// 数据源：proxyStatuses（5s 轮询）+ serverTraffic（5s 轮询），不依赖 frpc stdout 管道
+const proxyRequests = computed(() => {
+  const sid = appStore.defaultServerId || appStore.servers[0]?.id;
+  if (!sid) return [];
+  const serverProxies = appStore.proxies.filter(p => p.server_id === sid);
+  return serverProxies.map(p => {
+    const key = `${sid}-${p.name}`;
+    const ps = appStore.proxyStatuses.get(key);
+    return {
+      name: p.name,
+      type: (p.type || 'tcp').toUpperCase(),
+      online: ps?.state === 'online',
+      trafficIn: ps?.today_traffic_in || 0,
+      trafficOut: ps?.today_traffic_out || 0,
+    };
+  });
+});
 
-function onTerminalScroll() {
-  const el = logTerminalRef.value;
-  if (!el) return;
-  // 距底部 40px 内视为跟随；上滚则暂停自动滚动
-  autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-}
+// 默认服务器总流量
+const totalTraffic = computed(() => {
+  const sid = appStore.defaultServerId || appStore.servers[0]?.id;
+  if (!sid) return { in: 0, out: 0 };
+  const t = appStore.serverTraffic.get(sid);
+  return {
+    in: t?.total_traffic_in || 0,
+    out: t?.total_traffic_out || 0,
+  };
+});
 
-function clearLiveLogs() {
-  appStore.clearLiveLogs();
+// 格式化流量
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 // 加载状态（启动/停止按钮动画）
@@ -146,32 +165,15 @@ async function stopFrp() {
   }
 }
 
-onMounted(async () => {
+onMounted(() => {
   // 立即校准一次（切页回来时恢复正确时长，而非从 0 重计）
   tickUptime();
   uptimeTimer = setInterval(tickUptime, 1000);
-
-  // 实时日志缓冲为空时，从磁盘日志预填最近内容（切页/重启后不丢上下文）
-  appStore.loadRecentLogsFromDisk();
-
-  // 订阅后端 frpc 实时日志事件
-  try {
-    unlistenLog = await listen<{ line: string; timestamp: number }>('frpc-log', (event) => {
-      appStore.appendLiveLog(event.payload.line, event.payload.timestamp);
-      nextTick(() => {
-        if (autoScroll.value && logTerminalRef.value) {
-          logTerminalRef.value.scrollTop = logTerminalRef.value.scrollHeight;
-        }
-      });
-    });
-  } catch (e) {
-    console.error('订阅实时日志失败:', e);
-  }
+  // 代理请求信息由全局 5s 轮询自动刷新，无需额外订阅
 });
 
 onUnmounted(() => {
   if (uptimeTimer) clearInterval(uptimeTimer);
-  if (unlistenLog) unlistenLog();
 });
 </script>
 
@@ -217,26 +219,35 @@ onUnmounted(() => {
       </a-space>
     </a-card>
 
-    <!-- 实时日志 -->
-    <a-card class="logs-card" :bordered="false">
+    <!-- 代理请求 -->
+    <a-card class="proxy-requests-card" :bordered="false">
       <template #title>
-        <div class="logs-header">
-          <span>实时日志</span>
-          <div class="logs-actions">
-            <a-checkbox v-model:checked="autoScroll">自动滚动</a-checkbox>
-            <a-button size="small" @click="clearLiveLogs">清空</a-button>
-            <a-button type="link" size="small" @click="router.push('/logs')">查看全部</a-button>
-          </div>
+        <div class="card-header">
+          <span>代理请求</span>
+          <span class="refresh-hint">每 5 秒自动刷新</span>
         </div>
       </template>
-      <div ref="logTerminalRef" class="log-terminal" @scroll="onTerminalScroll">
-        <div v-if="recentLogs.length === 0" class="log-empty">
-          暂无运行日志 —— 启动 FRP 后此处将实时显示 frpc 输出
+      <div class="proxy-list">
+        <div v-if="proxyRequests.length === 0" class="proxy-empty">
+          暂无代理 —— 添加代理并启动 FRP 后此处将显示代理请求状态
         </div>
-        <div v-for="(log, idx) in recentLogs" :key="idx" class="log-line" :class="{ 'log-error': log.isError }">
-          <span class="log-ts">{{ log.ts }}</span>
-          <span class="log-text">{{ log.line }}</span>
+        <div v-for="item in proxyRequests" :key="item.name" class="proxy-row">
+          <span class="proxy-dot" :class="{ 'dot-online': item.online, 'dot-offline': !item.online }"></span>
+          <span class="proxy-name">{{ item.name }}</span>
+          <span class="proxy-type">{{ item.type }}</span>
+          <span class="proxy-state" :class="{ 'state-online': item.online, 'state-offline': !item.online }">
+            {{ item.online ? 'online' : 'offline' }}
+          </span>
+          <span class="proxy-traffic">
+            <ArrowDownOutlined /> {{ formatBytes(item.trafficIn) }}
+            <ArrowUpOutlined /> {{ formatBytes(item.trafficOut) }}
+          </span>
         </div>
+      </div>
+      <div v-if="proxyRequests.length > 0" class="traffic-summary">
+        <span>总流量：</span>
+        <span class="traffic-item"><ArrowDownOutlined /> {{ formatBytes(totalTraffic.in) }}</span>
+        <span class="traffic-item"><ArrowUpOutlined /> {{ formatBytes(totalTraffic.out) }}</span>
       </div>
     </a-card>
   </div>
@@ -250,16 +261,33 @@ onUnmounted(() => {
 .stat-title { font-size: 13px; color: #8c8c8c; margin-bottom: 10px; }
 .stat-value { font-size: 24px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .stat-icon { font-size: 22px; }
-.quick-actions-card, .logs-card { border-radius: 8px; margin-bottom: 16px; }
-.logs-header { display: flex; align-items: center; justify-content: space-between; }
-.logs-actions { display: flex; align-items: center; gap: 8px; }
-.log-terminal {
-  background: #0d1117; color: #c9d1d9; border-radius: 6px;
-  padding: 12px; height: 320px; overflow-y: auto;
-  font-family: 'Consolas', 'Monaco', monospace; font-size: 12px;
+.quick-actions-card, .proxy-requests-card { border-radius: 8px; margin-bottom: 16px; }
+.card-header { display: flex; align-items: center; justify-content: space-between; }
+.refresh-hint { font-size: 12px; color: #8c8c8c; font-weight: normal; }
+.proxy-list {
+  background: #fafafa; border-radius: 6px; padding: 8px 12px;
+  min-height: 120px; max-height: 320px; overflow-y: auto;
 }
-.log-empty { color: #6e7681; text-align: center; margin-top: 140px; }
-.log-line { padding: 1px 0; word-break: break-all; }
-.log-error .log-text { color: #ff7b72; }
-.log-ts { color: #6e7681; margin-right: 10px; }
+.proxy-empty { color: #8c8c8c; text-align: center; margin-top: 40px; }
+.proxy-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 0; border-bottom: 1px solid #f0f0f0;
+  font-size: 13px;
+}
+.proxy-row:last-child { border-bottom: none; }
+.proxy-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot-online { background: #52c41a; box-shadow: 0 0 4px rgba(82,196,26,0.5); }
+.dot-offline { background: #bfbfbf; }
+.proxy-name { font-weight: 500; min-width: 100px; }
+.proxy-type { color: #8c8c8c; min-width: 50px; font-size: 12px; }
+.proxy-state { min-width: 60px; font-size: 12px; }
+.state-online { color: #52c41a; }
+.state-offline { color: #8c8c8c; }
+.proxy-traffic { margin-left: auto; color: #595959; display: flex; align-items: center; gap: 6px; }
+.traffic-summary {
+  display: flex; align-items: center; gap: 16px;
+  padding: 8px 12px; border-top: 2px solid #f0f0f0;
+  font-size: 13px; color: #595959; margin-top: 4px;
+}
+.traffic-item { display: flex; align-items: center; gap: 4px; }
 </style>

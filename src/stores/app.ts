@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { FrpConfig, ProcessStatus, LogEntry } from '@/types';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
@@ -41,7 +41,15 @@ export const useAppStore = defineStore('app', () => {
   const proxyStatuses = ref<Map<string, any>>(new Map());  // 代理状态
   const serverTraffic = ref<Map<string, any>>(new Map());  // 服务器流量
   // FRP 启动时刻（全局，修复：运行时长曾存组件本地，切页即重置）
-  const frpcStartedAt = ref<number | null>(null);
+  // 从 localStorage 恢复初始值（右键刷新后兜底，轮询会用后端 last_start_time 覆盖）
+  const frpcStartedAt = ref<number | null>(
+    Number(localStorage.getItem('frpcStartedAt')) || null
+  );
+  // 持久化到 localStorage（刷新兜底，防止运行时长归零）
+  watch(frpcStartedAt, (v) => {
+    if (v) localStorage.setItem('frpcStartedAt', String(v));
+    else localStorage.removeItem('frpcStartedAt');
+  });
   // 实时日志缓冲（全局，修复：曾存组件本地，切页即清空）
   const liveLogs = ref<{ ts: string; line: string; isError: boolean }[]>([]);
   const MAX_LIVE_LOGS = 500;
