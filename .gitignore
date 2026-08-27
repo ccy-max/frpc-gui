@@ -53,3 +53,10 @@ coverage
 
 # Persistent data (user-specific, should not be committed)
 frpc-gui-data.json
+
+# 编码过程文档不提交远程（只保留 README.md）
+# 大写开头的是临时报告/计划/总结/TODO，不属于正式文档
+/[A-Z]*.md
+!/README.md
+*_TODO.md
+*_todo.md
