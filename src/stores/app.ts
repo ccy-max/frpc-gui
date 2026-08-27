@@ -69,9 +69,14 @@ export const useAppStore = defineStore('app', () => {
       const lines = content.trim().split('\n').slice(-100);
       for (const l of lines) {
         // 磁盘格式: [2026/8/26 18:50:33] [sid][FRP] xxx
-        const m = l.match(/^\[([^\]]+)\]\s(.*)$/);
-        if (m) appendLiveLog(m[2], Date.now());
-        else appendLiveLog(l, Date.now());
+        const m = l.match(/^\[(\d{4})\/(\d{1,2})\/(\d{1,2}) (\d{1,2}):(\d{2}):(\d{2})\]\s(.*)$/);
+        if (m) {
+          // 用日志行的真实时间戳（而非当前时间），避免历史行显示成"刚刚"
+          const ts = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+          appendLiveLog(m[7], ts);
+        } else {
+          appendLiveLog(l, Date.now());
+        }
       }
     } catch { /* 磁盘日志不存在时静默 */ }
   }
@@ -81,9 +86,13 @@ export const useAppStore = defineStore('app', () => {
   // 计算属性
   const isRunning = computed(() => processStatus.value.running);
   const runningServersCount = computed(() => processStatus.value.running ? 1 : 0);
+  // 修复：活跃代理应基于实际代理列表（proxies），而非 frpConfig（延迟加载且常为 null）
   const activeProxies = computed(() => {
-    if (!frpConfig.value) return [];
-    return frpConfig.value.proxies.filter(p => p.enabled);
+    return proxies.value.filter(p =>
+      p.enabled !== false &&
+      !p.is_range_port &&
+      p.visitors_model !== 'visitors'
+    );
   });
   const activeProxiesCount = computed(() => activeProxies.value.length);
 
@@ -275,28 +284,15 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // ===== 多服务器 FRP 进程控制 =====
-  async function startServer(serverId: string) {
-    const server = servers.value.find(s => s.id === serverId);
-    if (!server) throw new Error('服务器不存在');
-
-    // 获取该服务器的所有代理，端口统一字符串化（后端 Option<String>）
-    const serverProxies = proxies.value
-      .filter(p => p.server_id === serverId)
-      .map(p => ({
-        ...p,
-        local_port: p.local_port != null ? String(p.local_port) : null,
-        remote_port: p.remote_port != null ? String(p.remote_port) : null,
-      }));
-
-    // 构建完整 FrpConfig —— 字段名必须与后端 Rust 结构 snake_case 严格一致
-    // （FrpConfig 无 rename_all，驼峰字段会被 serde 静默丢弃导致反序列化失败）
-    const config = {
+  /// 构建完整 FrpConfig（前后端契约：snake_case，严格对齐后端 Rust FrpConfig）
+  /// start / restart 共用，消除此前 restart 用 camelCase 导致 serde 静默丢字段的 bug
+  function buildServerConfig(server: any, serverProxies: any[]) {
+    return {
       // 必填：服务器地址与端口
       server_addr: String(server.serverAddr ?? ''),
       server_port: Number(server.serverPort ?? 7000),
       user: null,
-      // 认证：generate_toml 从 auth.method/auth.token 读取，
-      // 顶层 token 字段会被丢弃，必须放对位置
+      // 认证：generate_toml 从 auth.method/auth.token 读取
       auth: {
         method: server.token ? 'token' : 'none',
         token: server.token || null,
@@ -309,20 +305,28 @@ export const useAppStore = defineStore('app', () => {
         trusted_ca_file: null,
       },
       log: { level: 'info', max_days: 7 },
-      admin: {
-        addr: '127.0.0.1',
-        port: 7400,
-        user: 'admin',
-        password: 'admin',
-      },
+      admin: { addr: '127.0.0.1', port: 7400, user: 'admin', password: 'admin' },
       transport: {},
       web_server: { addr: '127.0.0.1', port: 0, user: null, password: null },
       metadatas: null,
       login_fail_exit: false,
       udp_packet_size: 1500,
-      proxies: serverProxies,
+      // 端口统一字符串化（后端 Option<String>），null 保 null 不转 "null"
+      proxies: serverProxies.map(p => ({
+        ...p,
+        local_port: p.local_port != null ? String(p.local_port) : null,
+        remote_port: p.remote_port != null ? String(p.remote_port) : null,
+      })),
       visitors: [],
     };
+  }
+
+  async function startServer(serverId: string) {
+    const server = servers.value.find(s => s.id === serverId);
+    if (!server) throw new Error('服务器不存在');
+
+    const serverProxies = proxies.value.filter(p => p.server_id === serverId);
+    const config = buildServerConfig(server, serverProxies);
 
     await invoke('start_server', { serverId, config });
     frpcStartedAt.value = Date.now();
@@ -338,21 +342,11 @@ export const useAppStore = defineStore('app', () => {
   async function restartServer(serverId: string) {
     const server = servers.value.find(s => s.id === serverId);
     if (!server) throw new Error('服务器不存在');
-    
+
     const serverProxies = proxies.value.filter(p => p.server_id === serverId);
-    
-    const config = {
-      serverAddr: server.serverAddr,
-      serverPort: server.serverPort,
-      token: server.token,
-      tlsEnable: server.tlsEnable,
-      proxies: serverProxies.map(p => ({
-        ...p,
-        local_port: String(p.local_port),
-        remote_port: String(p.remote_port),
-      })),
-    };
-    
+    // 复用 buildServerConfig —— 与 start 完全一致（修复 camelCase 契约断裂）
+    const config = buildServerConfig(server, serverProxies);
+
     await invoke('restart_server', { serverId, config });
     frpcStartedAt.value = Date.now();
     await refreshServerStatus(serverId);

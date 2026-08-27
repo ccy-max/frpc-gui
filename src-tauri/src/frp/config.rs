@@ -404,14 +404,43 @@ impl ConfigManager {
             if let Some(ref v) = proxy.local_ip { ini.push_str(&format!("local_ip = {}\n", v)); }
             if let Some(ref v) = proxy.local_port { ini.push_str(&format!("local_port = {}\n", v)); }
             if let Some(ref v) = proxy.remote_port { ini.push_str(&format!("remote_port = {}\n", v)); }
-            if let Some(ref v) = proxy.custom_domains {
-                if !v.is_empty() {
-                    ini.push_str(&format!("custom_domains = {}\n", v.join(",")));
+
+            match proxy.proxy_type.as_str() {
+                "http" | "https" => {
+                    if let Some(ref v) = proxy.custom_domains {
+                        if !v.is_empty() {
+                            // 旧版 INI 多个域名用逗号分隔
+                            ini.push_str(&format!("custom_domains = {}\n", v.join(",")));
+                        }
+                    }
+                    if let Some(ref v) = proxy.subdomain {
+                        if !v.is_empty() { ini.push_str(&format!("subdomain = {}\n", v)); }
+                    }
+                    if let Some(ref v) = proxy.host_header_rewrite {
+                        if !v.is_empty() { ini.push_str(&format!("host_header_rewrite = {}\n", v)); }
+                    }
+                    if let Some(ref v) = proxy.http_user {
+                        if !v.is_empty() { ini.push_str(&format!("http_user = {}\n", v)); }
+                    }
+                    if let Some(ref v) = proxy.http_password {
+                        if !v.is_empty() { ini.push_str(&format!("http_password = {}\n", v)); }
+                    }
                 }
+                "stcp" | "xtcp" | "sudp" => {
+                    // 旧版 INI：stcp/xtcp 用 role + sk + server_name
+                    if let Some(ref v) = proxy.role {
+                        ini.push_str(&format!("role = {}\n", v));
+                    }
+                    if let Some(ref v) = proxy.secret_key {
+                        if !v.is_empty() { ini.push_str(&format!("sk = {}\n", v)); }
+                    }
+                    if let Some(ref v) = proxy.server_name {
+                        if !v.is_empty() { ini.push_str(&format!("server_name = {}\n", v)); }
+                    }
+                }
+                _ => {}
             }
-            if let Some(ref v) = proxy.subdomain {
-                if !v.is_empty() { ini.push_str(&format!("subdomain = {}\n", v)); }
-            }
+
             if proxy.use_encryption == Some(true) { ini.push_str("use_encryption = true\n"); }
             if proxy.use_compression == Some(true) { ini.push_str("use_compression = true\n"); }
         }
@@ -428,6 +457,9 @@ impl ConfigManager {
     /// 4. 处理 visitors
     /// 5. 处理 https2http 插件
     pub fn generate_toml(&self, config: &FrpConfig, _log_file_path: &str) -> Result<String> {
+        // 端口校验：非法端口不应被静默丢弃（此前 if let Ok 跳过 → 配置缺字段 → frpc 行为诡异）
+        Self::validate_proxy_ports(config)?;
+
         let mut toml = String::new();
 
         // ═══ 1. 顶层键必须在任何 [section] 之前！ ═══
@@ -560,6 +592,32 @@ impl ConfigManager {
     fn is_visitor(proxy: &ProxyConfig) -> bool {
         proxy.visitors_model.as_deref() == Some("visitors")
             && ["stcp", "sudp", "xtcp"].contains(&proxy.proxy_type.as_str())
+    }
+
+    /// 校验代理端口合法性（tcp/udp 必须有可解析的 local_port / remote_port）
+    fn validate_proxy_ports(config: &FrpConfig) -> Result<()> {
+        for proxy in config.proxies.iter().filter(|p| p.enabled) {
+            if Self::is_range_port(proxy) || Self::is_visitor(proxy) {
+                continue;
+            }
+            if ["tcp", "udp"].contains(&proxy.proxy_type.as_str()) {
+                if let Some(lp) = &proxy.local_port {
+                    lp.parse::<u16>().map_err(|_| {
+                        anyhow::anyhow!("代理 {} 的 local_port 非法: {}", proxy.name, lp)
+                    })?;
+                } else {
+                    return Err(anyhow::anyhow!("代理 {} 缺少 local_port", proxy.name));
+                }
+                if let Some(rp) = &proxy.remote_port {
+                    rp.parse::<u16>().map_err(|_| {
+                        anyhow::anyhow!("代理 {} 的 remote_port 非法: {}", proxy.name, rp)
+                    })?;
+                } else {
+                    return Err(anyhow::anyhow!("代理 {} 缺少 remote_port", proxy.name));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// 生成单个代理的 TOML

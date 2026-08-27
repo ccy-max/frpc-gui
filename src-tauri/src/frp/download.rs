@@ -251,6 +251,16 @@ impl FrpVersionManager {
         };
 
         let versions = vec![
+            ("v0.71.0", "Release v0.71.0"),
+            ("v0.70.0", "Release v0.70.0"),
+            ("v0.69.0", "Release v0.69.0"),
+            ("v0.68.0", "Release v0.68.0"),
+            ("v0.67.0", "Release v0.67.0"),
+            ("v0.66.0", "Release v0.66.0"),
+            ("v0.65.0", "Release v0.65.0"),
+            ("v0.64.0", "Release v0.64.0"),
+            ("v0.63.0", "Release v0.63.0"),
+            ("v0.62.0", "Release v0.62.0"),
             ("v0.61.0", "Release v0.61.0"),
             ("v0.60.0", "Release v0.60.0"),
             ("v0.59.0", "Release v0.59.0"),
@@ -442,10 +452,13 @@ impl FrpVersionManager {
             let version_dir = self.install_dir.join(version);
             fs::create_dir_all(&version_dir)?;
 
+            // 路径中的单引号转义为两个单引号（PowerShell 单引号字符串内唯一转义），
+            // 防止路径含引号时命令被截断/注入（M16 加固）
+            let safe_src = archive_path.display().to_string().replace('\'', "''");
+            let safe_dst = version_dir.display().to_string().replace('\'', "''");
             let ps_script = format!(
                 "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
-                archive_path.display(),
-                version_dir.display()
+                safe_src, safe_dst
             );
             let mut cmd = std::process::Command::new("powershell");
             crate::utils::hide_window(&mut cmd);
@@ -534,11 +547,34 @@ impl FrpVersionManager {
 
     /// 删除指定版本
     pub fn delete_version(&self, version: &str) -> Result<()> {
+        // 参数校验：防止路径遍历（version 会拼进 join 形成目录路径）
+        if !Self::is_valid_version_name(version) {
+            return Err(anyhow::anyhow!("非法版本名: {}", version));
+        }
+        // 禁止删除当前激活（正在使用）的版本
+        if self.get_active_version().as_deref() == Some(version) {
+            return Err(anyhow::anyhow!(
+                "版本 {} 正在使用中，请先在版本管理切换到其他版本再删除",
+                version
+            ));
+        }
         let version_dir = self.install_dir.join(version);
         if version_dir.exists() {
             fs::remove_dir_all(&version_dir)?;
         }
         Ok(())
+    }
+
+    /// 校验版本名合法性（防止 delete_version 的目录路径遍历）
+    /// 仅允许标准语义版本（v0.52.0）或固定别名 imported
+    fn is_valid_version_name(version: &str) -> bool {
+        if version == "imported" {
+            return true;
+        }
+        // 允许 v0.52.0 或 0.52.0
+        let v = version.strip_prefix('v').unwrap_or(version);
+        let parts: Vec<&str> = v.split('.').collect();
+        parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
     }
 
     /// 导入本地 frpc 文件

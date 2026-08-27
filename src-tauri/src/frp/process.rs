@@ -16,19 +16,6 @@ use tokio::sync::mpsc;
 use std::os::windows::process::CommandExt;
 
 /// 连接错误/成功匹配模式
-const FRPC_ERROR_PATTERNS: &[&str] = &[
-    "connect to server error",
-    "login to server failed",
-];
-const FRPC_SUCCESS_PATTERNS: &[&str] = &[
-    "login to server success",
-    "start proxy success",
-    "proxy added success",
-];
-/// 断线通知冷却时间（秒）
-const DISCONNECT_COOLDOWN_SECS: u64 = 60;
-/// 自动重启冷却时间（秒）
-const RECOVERY_COOLDOWN_SECS: u64 = 10;
 
 /// 进程状态
 #[derive(Debug, Clone)]
@@ -128,6 +115,26 @@ impl FrpProcessManager {
         info!("Starting FRP process: {:?}", self.frpc_path);
         self.running.store(true, Ordering::SeqCst);
 
+        // 分配 Admin/WebServer 端口：web_server.port==0 表示由后端自动分配，
+        // 避免多进程同时运行都抢 7400 造成冲突（此前为规避冲突干脆关掉 Admin API，
+        // 导致流量/代理状态监控整体失效——S4 修复）。
+        let mut cfg = config.clone();
+        if cfg.web_server.port == 0 {
+            let mut p = 7400u16;
+            while p < 7500 && !FrpProcessManager::check_port_available(p) {
+                p += 1;
+            }
+            cfg.web_server.port = p;
+        }
+        // 记录 Admin API 端点（用分配后的端口，供监控查询使用）
+        // frpc 的 Admin API 即 [webServer] 段，字段与 AdminConfig 同构
+        self.set_admin_endpoint(crate::frp::config::AdminConfig {
+            addr: cfg.web_server.addr.clone(),
+            port: cfg.web_server.port,
+            user: cfg.web_server.user.clone(),
+            password: cfg.web_server.password.clone(),
+        });
+
         // 生成配置文件：按 frpc 版本自动选择格式
         // - frp >= 0.52.0 → TOML（新版格式，serverAddr = "..."）
         // - frp <  0.52.0 → INI（旧版格式，[common] 段）
@@ -136,14 +143,14 @@ impl FrpProcessManager {
         let cm = ConfigManager::new(self.config_path.clone());
         let use_toml = Self::frpc_supports_toml(&self.frpc_path);
         let config_file = if use_toml {
-            let toml_content = cm.generate_toml(config, self.log_file_path.to_string_lossy().as_ref())?;
+            let toml_content = cm.generate_toml(&cfg, self.log_file_path.to_string_lossy().as_ref())?;
             std::fs::write(&self.config_path, toml_content)
                 .with_context(|| "写入 frpc.toml 失败")?;
             self.config_path.clone()
         } else {
             info!("frpc 为旧版本，使用 INI 格式配置");
             let ini_path = self.config_path.with_extension("ini");
-            let ini_content = cm.generate_ini(config, self.log_file_path.to_string_lossy().as_ref())?;
+            let ini_content = cm.generate_ini(&cfg, self.log_file_path.to_string_lossy().as_ref())?;
             std::fs::write(&ini_path, ini_content)
                 .with_context(|| "写入 frpc.ini 失败")?;
             ini_path
@@ -446,6 +453,14 @@ impl FrpProcessManager {
 
         info!("Reloading FRP config, PID: {}", self.pid());
 
+        // 旧版 frpc（< 0.52.0，INI 格式）不支持 `reload` 子命令且配置是 INI，
+        // 热重载会静默失败——明确报错引导用户改用重启
+        if !Self::frpc_supports_toml(&self.frpc_path) {
+            return Err(anyhow::anyhow!(
+                "当前 frpc 版本（< 0.52.0）不支持热重载，请在代理页使用「重启」代替"
+            ));
+        }
+
         // 重新生成配置文件
         let cm = ConfigManager::new(self.config_path.clone());
         let toml_content = cm.generate_toml(config, self.log_file_path.to_string_lossy().as_ref())?;
@@ -495,7 +510,8 @@ impl FrpProcessManager {
 
         #[cfg(windows)]
         {
-            // Windows: 用 tasklist 检查进程是否存在
+            // Windows: 用 tasklist CSV 解析，精确比对第二列 PID
+            // （避免 "123" 误匹配 "1234" 这类子串命中）
             use std::process::Command;
             let mut cmd = Command::new("tasklist");
             crate::utils::hide_window(&mut cmd);
@@ -505,7 +521,11 @@ impl FrpProcessManager {
             match output {
                 Ok(o) => {
                     let stdout = String::from_utf8_lossy(&o.stdout);
-                    stdout.contains(&pid.to_string())
+                    stdout.lines().any(|line| {
+                        // CSV 形如: "frpc.exe","1234","..."; 第二列是 PID
+                        let parts: Vec<&str> = line.split(',').collect();
+                        parts.get(1).map(|p| p.trim_matches('"')) == Some(&pid.to_string())
+                    })
                 }
                 Err(_) => false,
             }
@@ -513,99 +533,9 @@ impl FrpProcessManager {
     }
 
     /// 探测外部 frpc 进程（应用重启后恢复状态）
-    pub fn detect_external_process(&mut self) -> bool {
-        #[cfg(windows)]
-        {
-            let frpc_name = "frpc.exe";
-            let mut cmd = Command::new("tasklist");
-            crate::utils::hide_window(&mut cmd);
-            let output = cmd
-                .args(["/FI", &format!("IMAGENAME eq {}", frpc_name), "/FO", "CSV", "/NH"])
-                .output();
-            if let Ok(o) = output {
-                let stdout = String::from_utf8_lossy(&o.stdout);
-                for line in stdout.lines() {
-                    let parts: Vec<&str> = line.split("\",\"").collect();
-                    if parts.len() >= 2 {
-                        if let Ok(pid) = parts[1].parse::<u32>() {
-                            self.pid.store(pid, Ordering::SeqCst);
-                            self.running.store(true, Ordering::SeqCst);
-                            *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner()) = chrono::Local::now().timestamp();
-                            info!("Detected external frpc process, PID: {}", pid);
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-
-        #[cfg(unix)]
-        {
-            let frpc_name = "frpc";
-            let output = Command::new("pgrep")
-                .arg("-x")
-                .arg(frpc_name)
-                .output();
-            if let Ok(o) = output {
-                let stdout = String::from_utf8_lossy(&o.stdout);
-                if let Some(first_line) = stdout.lines().next() {
-                    if let Ok(pid) = first_line.trim().parse::<u32>() {
-                        self.pid.store(pid, Ordering::SeqCst);
-                        self.running.store(true, Ordering::SeqCst);
-                        *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner()) = chrono::Local::now().timestamp();
-                        info!("Detected external frpc process, PID: {}", pid);
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
-    }
-
-
     // ==================== 进程守护 ====================
 
     /// 启动进程守护（定时检查 + 自动重启）
-    pub fn start_guardian(self) {
-        let pm = Arc::new(self.clone_shallow());
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-                let running = pm.is_process_alive();
-                let start_time = *pm.last_start_time.lock().unwrap_or_else(|e| e.into_inner());
-
-                if !running && start_time != -1 {
-                    // 检查冷却期
-                    let now = chrono::Local::now().timestamp();
-                    let last_recovery = *pm.last_recovery_time.lock().unwrap_or_else(|e| e.into_inner());
-                    if last_recovery != -1 && (now - last_recovery) < RECOVERY_COOLDOWN_SECS as i64 {
-                        continue;
-                    }
-
-                    if pm.recovery_checking.swap(true, Ordering::SeqCst) {
-                        continue;
-                    }
-
-                    *pm.last_recovery_time.lock().unwrap_or_else(|e| e.into_inner()) = now;
-
-                    // 检查网络
-                    if check_internet().await {
-                        warn!("FRP process died, network available, attempting restart...");
-                        // 自动重启需要配置，这里只标记状态
-                        let _ = pm.log_tx.send("[GUARD] 检测到进程退出，网络可用，等待自动重启".to_string()).await;
-                    } else {
-                        warn!("FRP process died, network unreachable, waiting...");
-                        let _ = pm.log_tx.send("[GUARD] 检测到进程退出，网络不可用".to_string()).await;
-                    }
-
-                    pm.recovery_checking.store(false, Ordering::SeqCst);
-                }
-            }
-        });
-    }
-
     // ==================== 端口检查 ====================
 
     /// 检查端口是否被占用
@@ -658,56 +588,6 @@ impl FrpProcessManager {
         self.recovery_checking.store(false, Ordering::SeqCst);
     }
 
-    /// 浅克隆（共享 Arc 内部状态）
-    fn clone_shallow(&self) -> FrpProcessManager {
-        FrpProcessManager {
-            running: self.running.clone(),
-            pid: self.pid.clone(),
-            child: self.child.clone(),
-            log_tx: self.log_tx.clone(),
-            frpc_path: self.frpc_path.clone(),
-            config_path: self.config_path.clone(),
-            log_file_path: self.log_file_path.clone(),
-            last_start_time: self.last_start_time.clone(),
-            last_recovery_time: self.last_recovery_time.clone(),
-            last_notify_time: self.last_notify_time.clone(),
-            recovery_checking: self.recovery_checking.clone(),
-            admin_endpoint: std::sync::Mutex::new(
-                self.admin_endpoint.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-            ),
-            server_id: std::sync::Mutex::new(
-                self.server_id.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-            ),
-        }
-    }
-}
-
-/// 检查网络连通性
-async fn check_internet() -> bool {
-    // 使用 std::process::Command 同步检查（简单可靠）
-    #[cfg(windows)]
-    {
-        let mut cmd = Command::new("ping");
-        crate::utils::hide_window(&mut cmd);
-        let output = cmd
-            .args(["-n", "1", "8.8.8.8"])
-            .output();
-        match output {
-            Ok(o) => o.status.success(),
-            Err(_) => false,
-        }
-    }
-
-    #[cfg(unix)]
-    {
-        let output = Command::new("ping")
-            .args(["-c", "1", "-W", "3", "8.8.8.8"])
-            .output();
-        match output {
-            Ok(o) => o.status.success(),
-            Err(_) => false,
-        }
-    }
 }
 
 // ==================== 独立函数 ====================

@@ -24,6 +24,8 @@ pub struct AppState {
     pub log_tx: Mutex<Option<mpsc::Sender<String>>>,
     pub settings_manager: Mutex<Option<SettingsManager>>,
     pub version_manager: Mutex<Option<FrpVersionManager>>,
+    /// 下载串行锁：防止同版本/跨版本并发下载写同一文件导致损坏
+    pub download_lock: tokio::sync::Mutex<()>,
 }
 
 impl AppState {
@@ -35,6 +37,7 @@ impl AppState {
             log_tx: Mutex::new(Some(log_tx)),
             settings_manager: Mutex::new(None),
             version_manager: Mutex::new(None),
+            download_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -46,6 +49,7 @@ impl AppState {
             log_tx: Mutex::new(Some(log_tx)),
             settings_manager: Mutex::new(None),
             version_manager: Mutex::new(None),
+            download_lock: tokio::sync::Mutex::new(()),
         }
     }
 }
@@ -314,6 +318,8 @@ pub async fn list_frp_versions(state: State<'_, AppState>) -> Result<Vec<FrpVers
 pub async fn download_frp_version(version: String, url: String, state: State<'_, AppState>) -> Result<String, String> {
     info!("Downloading FRP {} from {}", version, url);
     let vm = state.version_manager.lock().await;
+    // 串行化下载，防止并发写同一文件损坏（H14）
+    let _guard = state.download_lock.lock().await;
     match vm.as_ref() {
         Some(m) => {
             let path = m.download_version(&version, &url, None).await.map_err(|e| e.to_string())?;
@@ -698,7 +704,7 @@ pub async fn get_downloaded_versions(state: State<'_, AppState>) -> Result<Vec<F
     }
 }
 
-/// #12 检查应用更新（获取最新版本）
+/// #12 检查应用更新（获取最新版本，含镜像回退）
 #[tauri::command]
 pub async fn check_app_update() -> Result<String, String> {
     info!("Checking for app updates");
@@ -709,23 +715,27 @@ pub async fn check_app_update() -> Result<String, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    let resp = client
-        .get("https://api.github.com/repos/ccy-max/frpc-gui/releases/latest")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let base = "https://api.github.com/repos/ccy-max/frpc-gui/releases/latest";
+    let candidates = vec![
+        base.to_string(),
+        format!("https://ghproxy.net/{}", base),
+        format!("https://gh-proxy.com/{}", base),
+    ];
 
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
+    for url in candidates {
+        if let Ok(resp) = client.get(&url).send().await {
+            if !resp.status().is_success() {
+                continue;
+            }
+            if let Ok(release) = resp.json::<serde_json::Value>().await {
+                if let Some(v) = release.get("tag_name").and_then(|x| x.as_str()) {
+                    return Ok(v.to_string());
+                }
+            }
+        }
     }
 
-    let release: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    let version = release.get("tag_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
-
-    Ok(version)
+    Err("更新检查失败（网络不可达）".to_string())
 }
 
 // ==================== 服务器和代理持久化 ====================
@@ -868,11 +878,20 @@ pub async fn start_server(
 ) -> Result<bool, String> {
     info!("Starting FRP for server: {}", server_id);
 
-    let mut pm_guard = state.process_managers.lock().await;
-    
-    // 检查是否已在运行
-    if pm_guard.contains_key(&server_id) {
-        return Err(format!("服务器 {} 的 FRP 进程已在运行中", server_id));
+    // 前置检查（短锁）：清理死 manager + 防重入
+    // 不在此持锁做后续慢操作（写配置/孤儿清场 sleep/frpc -v/spawn），
+    // 否则会阻塞其他服务器的状态查询（H2）
+    {
+        let mut pm_guard = state.process_managers.lock().await;
+        if let Some(pm) = pm_guard.get(&server_id) {
+            if !pm.is_process_alive() {
+                warn!("Removing stale dead manager for server {}", server_id);
+                pm_guard.remove(&server_id);
+            }
+        }
+        if pm_guard.contains_key(&server_id) {
+            return Err(format!("服务器 {} 的 FRP 进程已在运行中", server_id));
+        }
     }
 
     // 获取配置目录
@@ -921,11 +940,12 @@ pub async fn start_server(
     // 标识服务器来源（实时日志事件推送用）
     pm.set_server_id(server_id.clone());
 
-    // 启动进程
+    // 启动进程（锁外执行：孤儿清场 sleep + frpc -v + spawn 均为慢操作）
     match pm.start(&config).await {
         Ok(_) => {
             let pid = pm.get_pid();
-            pm_guard.insert(server_id.clone(), pm);
+            // 短锁插入 HashMap（start 已在锁外完成）
+            state.process_managers.lock().await.insert(server_id.clone(), pm);
             info!("FRP started for server {}: PID={}", server_id, pid);
             Ok(true)
         }
@@ -960,8 +980,25 @@ pub async fn stop_server(
             }
         }
         None => {
-            info!("FRP process not found for server {}", server_id);
-            Ok(true) // 进程不存在也算成功
+            info!("FRP manager not found for server {}, cleaning orphan by config dir", server_id);
+            // 应用重启后 manager 丢失，但旧 frpc 进程可能仍在跑（孤儿）。
+            // 构造临时 manager 走三级查找（内存/pid文件/命令行）强制清场，
+            // 避免 v1.0.12 之前"点停止却杀不掉"的回归。
+            let server_config_dir = get_server_config_dir(&server_id)?;
+            std::fs::create_dir_all(&server_config_dir).ok();
+            let config_path = server_config_dir.join("config.toml");
+            let (tx, _rx) = mpsc::channel::<String>(1);
+            let mut pm = FrpProcessManager::new(
+                PathBuf::from(if cfg!(windows) { "frpc.exe" } else { "frpc" }),
+                config_path,
+                tx,
+            );
+            pm.set_server_id(server_id.clone());
+            if let Err(e) = pm.stop().await {
+                error!("Failed to clean orphan for server {}: {}", server_id, e);
+                return Err(e.to_string());
+            }
+            Ok(true)
         }
     }
 }
@@ -1619,6 +1656,7 @@ pub fn init_app(app: &mut tauri::App) {
         log_tx: Mutex::new(Some(log_tx)),
         settings_manager: Mutex::new(Some(settings_manager)),
         version_manager: Mutex::new(Some(version_manager)),
+        download_lock: tokio::sync::Mutex::new(()),
     };
     app.manage(app_state);
 

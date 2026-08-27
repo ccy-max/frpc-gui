@@ -5,7 +5,60 @@ mod frp;
 mod utils;
 
 use log::info;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use tauri::Manager;
+
+/// 应用退出时清理所有 frpc 子进程（含孤儿），避免退出后进程残留
+fn kill_all_frpc_on_exit(app: &tauri::AppHandle) {
+    info!("App exiting, cleaning up frpc subprocesses");
+
+    let config_dir = dirs::config_dir()
+        .map(|d| d.join("frpc-gui"))
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // 扫描 servers/*/frpc.pid，按记录的 PID 精准终止（覆盖应用重启后的孤儿）
+    let servers_dir = config_dir.join("servers");
+    if let Ok(entries) = std::fs::read_dir(&servers_dir) {
+        for entry in entries.flatten() {
+            let pid_file = entry.path().join("frpc.pid");
+            if let Ok(content) = std::fs::read_to_string(&pid_file) {
+                if let Ok(pid) = content.trim().parse::<u32>() {
+                    kill_pid_by_platform(pid);
+                }
+            }
+        }
+    }
+
+    // 兜底：直接清除所有 frpc.exe（包括未被 pid 文件记录的进程）
+    #[cfg(windows)]
+    {
+        Command::new("taskkill")
+            .args(["/F", "/IM", "frpc.exe", "/T"])
+            .creation_flags(0x08000000)
+            .output()
+            .ok();
+    }
+    #[cfg(unix)]
+    {
+        Command::new("pkill").args(["-9", "frpc"]).output().ok();
+    }
+}
+
+fn kill_pid_by_platform(pid: u32) {
+    #[cfg(windows)]
+    {
+        Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(0x08000000)
+            .output()
+            .ok();
+    }
+    #[cfg(unix)]
+    {
+        Command::new("kill").args(["-9", &pid.to_string()]).output().ok();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -51,7 +104,11 @@ pub fn run() {
                                     let _ = window.set_focus();
                                 }
                             }
-                            "quit" => { app.exit(0); }
+                            "quit" => {
+                                // 退出前清理所有 frpc 子进程（含孤儿），避免残留（S3 修复）
+                                kill_all_frpc_on_exit(app);
+                                app.exit(0);
+                            }
                             _ => {}
                         })
                         .build(app)?;

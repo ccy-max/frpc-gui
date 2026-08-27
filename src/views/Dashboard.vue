@@ -118,7 +118,10 @@ onUnmounted(() => {
 
 async function startFrp() {
   try {
-    const defaultServer = appStore.servers[0];
+    // 优先使用设置的默认服务器，否则回退第一个
+    const defaultServer =
+      appStore.servers.find((s) => s.id === appStore.defaultServerId) ||
+      appStore.servers[0];
     if (!defaultServer) {
       message.warning('请先添加服务器');
       return;
@@ -132,7 +135,9 @@ async function startFrp() {
 
 async function stopFrp() {
   try {
-    const defaultServer = appStore.servers[0];
+    const defaultServer =
+      appStore.servers.find((s) => s.id === appStore.defaultServerId) ||
+      appStore.servers[0];
     if (!defaultServer) return;
     await appStore.stopServer(defaultServer.id);
     message.success('FRP 已停止');

@@ -28,7 +28,10 @@ async function refresh() {
 
 async function download(record: any) {
   downloading.value = record.version;
-  let url = record.mirror_url || record.download_url;
+  // 始终传原始 GitHub URL，镜像回退链由后端 build_download_candidates 统一构造。
+  // 历史 bug：此前优先用 mirror_url（已含镜像前缀），后端再拼一层前缀
+  // → 生成 ghproxy.net/ghproxy.net/原始 这种坏 URL → 下载全失败。
+  let url = record.download_url;
   
   message.loading(`正在下载 ${record.version}...`, 0);
   
