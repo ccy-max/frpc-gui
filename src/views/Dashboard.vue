@@ -11,7 +11,7 @@ import { useRouter } from 'vue-router';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   PlusOutlined, PlayCircleOutlined, PauseCircleOutlined,
-  FileTextOutlined, SettingOutlined, ReloadOutlined,
+  FileTextOutlined, SettingOutlined, ReloadOutlined, ClockCircleOutlined,
 } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
 
@@ -24,17 +24,31 @@ let unlistenLog: UnlistenFn | null = null;
 
 const MAX_LOG_LINES = 500;
 
+// 运行状态计算（基于默认服务器的实时状态）
+const status = computed(() => {
+  // 优先用默认服务器，回退到第一个服务器（defaultServerId 未设置时）
+  const sid = appStore.defaultServerId || appStore.servers[0]?.id;
+  const s = sid ? appStore.serverStatuses.get(sid) : null;
+  // 后端 ServerStatusResponse 字段：running(布尔) / state("running"/"stopped"等)
+  // 历史 bug：前端读 .status（不存在），后端返回 .state → isRunning 永远 false
+  const isRunning = s?.running === true || s?.state === 'running';
+  return {
+    title: '运行状态',
+    value: isRunning ? '运行中' : '已停止',
+    icon: isRunning ? PlayCircleOutlined : PauseCircleOutlined,
+    color: isRunning ? '#52c41a' : '#8c8c8c',
+    isRunning,
+  };
+});
+
 const stats = computed(() => [
   {
-    title: '运行状态',
-    value: appStore.isRunning ? '运行中' : '已停止',
-    icon: appStore.isRunning ? PlayCircleOutlined : PauseCircleOutlined,
-    color: appStore.isRunning ? '#52c41a' : '#8c8c8c',
+    ...status.value,
   },
   {
     title: '运行时长',
     value: formatUptime(uptimeSeconds.value),
-    icon: ReloadOutlined,
+    icon: ClockCircleOutlined,
     color: '#1890ff',
   },
   {
@@ -64,11 +78,12 @@ function formatUptime(totalSeconds: number): string {
 const uptimeSeconds = ref(0);
 let uptimeTimer: ReturnType<typeof setInterval> | null = null;
 
-// 运行时长基于全局 store 的启动时刻计算
-// （历史 bug：时长曾存组件本地 ref，切换导航组件重挂即清零重计）
+// 运行时长基于全局 store 的启动时刻 + 概览页 status 判定
+// （历史 bug：tickUptime 用 appStore.isRunning，但该值基于旧 processStatus，
+//  多进程模式永远 false → 运行时长永远 0）
 function tickUptime() {
   const startedAt = appStore.frpcStartedAt;
-  if (startedAt && appStore.isRunning) {
+  if (startedAt && status.value.isRunning) {
     uptimeSeconds.value = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
   } else {
     uptimeSeconds.value = 0;
@@ -86,6 +101,49 @@ function onTerminalScroll() {
 
 function clearLiveLogs() {
   appStore.clearLiveLogs();
+}
+
+// 加载状态（启动/停止按钮动画）
+// 历史 bug：此 ref 曾被困在 onUnmounted 闭包内，模板访问到 undefined → 无加载动画
+const actionLoading = ref({
+  start: false,
+  stop: false,
+});
+
+async function startFrp() {
+  actionLoading.value.start = true;
+  try {
+    // 优先使用设置的默认服务器，否则回退第一个
+    const defaultServer =
+      appStore.servers.find((s) => s.id === appStore.defaultServerId) ||
+      appStore.servers[0];
+    if (!defaultServer) {
+      message.warning('请先添加服务器');
+      return;
+    }
+    await appStore.startServer(defaultServer.id);
+    message.success('FRP 启动成功');
+  } catch (e) {
+    message.error(`启动失败：${String(e)}`);
+  } finally {
+    actionLoading.value.start = false;
+  }
+}
+
+async function stopFrp() {
+  actionLoading.value.stop = true;
+  try {
+    const defaultServer =
+      appStore.servers.find((s) => s.id === appStore.defaultServerId) ||
+      appStore.servers[0];
+    if (!defaultServer) return;
+    await appStore.stopServer(defaultServer.id);
+    message.success('FRP 已停止');
+  } catch (e) {
+    message.error(`停止失败：${String(e)}`);
+  } finally {
+    actionLoading.value.stop = false;
+  }
 }
 
 onMounted(async () => {
@@ -115,36 +173,6 @@ onUnmounted(() => {
   if (uptimeTimer) clearInterval(uptimeTimer);
   if (unlistenLog) unlistenLog();
 });
-
-async function startFrp() {
-  try {
-    // 优先使用设置的默认服务器，否则回退第一个
-    const defaultServer =
-      appStore.servers.find((s) => s.id === appStore.defaultServerId) ||
-      appStore.servers[0];
-    if (!defaultServer) {
-      message.warning('请先添加服务器');
-      return;
-    }
-    await appStore.startServer(defaultServer.id);
-    message.success('FRP 启动指令已发送');
-  } catch (e) {
-    message.error(`启动失败: ${String(e)}`);
-  }
-}
-
-async function stopFrp() {
-  try {
-    const defaultServer =
-      appStore.servers.find((s) => s.id === appStore.defaultServerId) ||
-      appStore.servers[0];
-    if (!defaultServer) return;
-    await appStore.stopServer(defaultServer.id);
-    message.success('FRP 已停止');
-  } catch (e) {
-    message.error(`停止失败: ${String(e)}`);
-  }
-}
 </script>
 
 <template>
@@ -170,11 +198,11 @@ async function stopFrp() {
           <template #icon><PlusOutlined /></template>
           添加服务器
         </a-button>
-        <a-button type="primary" :disabled="appStore.isRunning" :loading="false" @click="startFrp">
+        <a-button type="primary" :disabled="status.isRunning" :loading="actionLoading.start" @click="startFrp">
           <template #icon><PlayCircleOutlined /></template>
           启动 FRP
         </a-button>
-        <a-button danger :disabled="!appStore.isRunning" @click="stopFrp">
+        <a-button danger :disabled="!status.isRunning" :loading="actionLoading.stop" @click="stopFrp">
           <template #icon><PauseCircleOutlined /></template>
           停止 FRP
         </a-button>

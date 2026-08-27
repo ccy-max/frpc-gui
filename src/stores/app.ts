@@ -84,8 +84,21 @@ export const useAppStore = defineStore('app', () => {
   const connectionHistory = ref<any[]>([]);  // 连接历史
 
   // 计算属性
-  const isRunning = computed(() => processStatus.value.running);
-  const runningServersCount = computed(() => processStatus.value.running ? 1 : 0);
+  // 多进程模式：任一服务器 running 即视为整体运行
+  // 历史 bug：基于旧 processStatus（单进程），多进程下永远 false
+  const isRunning = computed(() => {
+    for (const s of serverStatuses.value.values()) {
+      if (s?.running) return true;
+    }
+    return false;
+  });
+  const runningServersCount = computed(() => {
+    let n = 0;
+    for (const s of serverStatuses.value.values()) {
+      if (s?.running) n++;
+    }
+    return n;
+  });
   // 修复：活跃代理应基于实际代理列表（proxies），而非 frpConfig（延迟加载且常为 null）
   const activeProxies = computed(() => {
     return proxies.value.filter(p =>
@@ -357,9 +370,21 @@ export const useAppStore = defineStore('app', () => {
       if (serverId) {
         const status = await invoke<any>('get_server_status', { serverId });
         serverStatuses.value.set(serverId, status);
+        // 从后端同步启动时刻（应用重启后恢复运行时长）
+        if (status.running && status.last_start_time) {
+          frpcStartedAt.value = status.last_start_time * 1000;
+        }
       } else {
         const statuses = await invoke<any[]>('get_all_servers_status');
+        // 触发响应式：用新 Map 替换（确保 computed 重新计算）
         serverStatuses.value = new Map(statuses.map(s => [s.server_id, s]));
+        // 同步任一运行中服务器的启动时刻
+        const running = statuses.find(s => s.running);
+        if (running && running.last_start_time) {
+          frpcStartedAt.value = running.last_start_time * 1000;
+        } else if (!running) {
+          frpcStartedAt.value = null;
+        }
       }
     } catch (e) {
       console.error('Failed to refresh server status:', e);
@@ -539,14 +564,9 @@ export const useAppStore = defineStore('app', () => {
         pid: status.pid,
         state: status.state,
       };
-      // 运行时长以后端记录的进程启动时刻为权威来源
-      // （后端 start 时记录 last_start_time，应用重启后仍准确）
-      if (status.running) {
-        const backendTs = status.last_start_time ? status.last_start_time * 1000 : null;
-        frpcStartedAt.value = backendTs ?? (frpcStartedAt.value ?? Date.now());
-      } else {
-        frpcStartedAt.value = null;
-      }
+      // frpcStartedAt 由 refreshServerStatus 统一管理（基于后端 last_start_time）
+      // 旧逻辑基于 get_process_status（单进程模式），多进程下返回 not_running
+      // 会错误清空 frpcStartedAt，导致运行时长归零
     } catch (e) { console.error('Failed to get process status:', e); }
   }
 
