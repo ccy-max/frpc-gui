@@ -132,9 +132,14 @@ impl Default for TlsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogConfig {
+    #[serde(default = "default_log_to")]
     pub to: String,
     pub level: String,
     pub max_days: u32,
+}
+
+fn default_log_to() -> String {
+    "console".to_string()
 }
 
 impl Default for LogConfig {

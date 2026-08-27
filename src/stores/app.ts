@@ -304,7 +304,7 @@ export const useAppStore = defineStore('app', () => {
         key_file: null,
         trusted_ca_file: null,
       },
-      log: { level: 'info', max_days: 7 },
+      log: { to: 'console', level: 'info', max_days: 7 },
       admin: { addr: '127.0.0.1', port: 7400, user: 'admin', password: 'admin' },
       transport: {},
       web_server: { addr: '127.0.0.1', port: 0, user: null, password: null },
