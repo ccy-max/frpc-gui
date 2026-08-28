@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
 import { useAppStore } from '@/stores/app';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { confirm } from '@tauri-apps/plugin-dialog';
 
 const appStore = useAppStore();
 
@@ -30,6 +33,38 @@ onMounted(async () => {
   setTimeout(() => {
     appStore.loadConfig().catch(console.error);
   }, 100);
+
+  // 拦截窗口关闭按钮：弹选择对话框
+  // 后端 CloseRequested 事件已阻止默认关闭，等前端决定
+  await listen('window-close-requested', async () => {
+    const confirmed = await confirm(
+      '关闭时停止 FRP 进程？\n\n✓ 停止并退出\n✗ 最小化到托盘',
+      '确认退出'
+    );
+    if (confirmed) {
+      // 用户选择退出：杀 frpc + 通知后端真正退出
+      await invoke('kill_all_frpc_on_exit').catch(console.error);
+      // 发送 quit 事件让后端执行 app.exit(0)
+      window.close();
+    } else {
+      // 用户选择最小化：保持窗口隐藏
+      // 后端已 prevent_close，前端只需隐藏窗口
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      getCurrentWindow().hide();
+    }
+  });
+
+  // 托盘"退出"菜单也走同样流程
+  await listen('app-quit-requested', async () => {
+    const confirmed = await confirm(
+      '确定要退出 FRPC GUI 吗？\n\n正在运行的 FRP 进程将被终止。',
+      '确认退出'
+    );
+    if (confirmed) {
+      await invoke('kill_all_frpc_on_exit').catch(console.error);
+      window.close();
+    }
+  });
 });
 
 onUnmounted(() => {

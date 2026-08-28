@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Manager, State};
 use tokio::sync::{mpsc, Mutex};
+use std::sync::Arc;
+
+// 应用退出时杀 frpc 进程
+pub type KillAllFrpFn = Arc<dyn Fn(&tauri::AppHandle) + Send + Sync>;
 
 // ==================== 应用状态 ====================
 
@@ -26,6 +30,8 @@ pub struct AppState {
     pub version_manager: Mutex<Option<FrpVersionManager>>,
     /// 下载串行锁：防止同版本/跨版本并发下载写同一文件导致损坏
     pub download_lock: tokio::sync::Mutex<()>,
+    /// 退出时杀 frpc 的回调（由 lib.rs 注入）
+    pub kill_all_frpc: Option<KillAllFrpFn>,
 }
 
 impl AppState {
@@ -38,6 +44,7 @@ impl AppState {
             settings_manager: Mutex::new(None),
             version_manager: Mutex::new(None),
             download_lock: tokio::sync::Mutex::new(()),
+            kill_all_frpc: None,
         }
     }
 
@@ -50,6 +57,7 @@ impl AppState {
             settings_manager: Mutex::new(None),
             version_manager: Mutex::new(None),
             download_lock: tokio::sync::Mutex::new(()),
+            kill_all_frpc: None,
         }
     }
 }
@@ -1643,6 +1651,57 @@ pub fn init_app(app: &mut tauri::App) {
         }
     });
 
+    // 注入退出时杀 frpc 的回调
+    let kill_fn: KillAllFrpFn = std::sync::Arc::new(|app_handle| {
+        use std::process::Command;
+        use log::info;
+
+        info!("Cleaning up frpc subprocesses on exit");
+
+        let config_dir = app_handle
+            .path()
+            .app_config_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("frpc-gui");
+
+        let servers_dir = config_dir.join("servers");
+        if let Ok(entries) = std::fs::read_dir(&servers_dir) {
+            for entry in entries.flatten() {
+                let pid_file = entry.path().join("frpc.pid");
+                if let Ok(content) = std::fs::read_to_string(&pid_file) {
+                    if let Ok(pid) = content.trim().parse::<u32>() {
+                        #[cfg(windows)]
+                        {
+                            Command::new("taskkill")
+                                .args(["/F", "/T", "/PID", &pid.to_string()])
+                                .creation_flags(0x08000000)
+                                .output()
+                                .ok();
+                        }
+                        #[cfg(unix)]
+                        {
+                            Command::new("kill").args(["-9", &pid.to_string()]).output().ok();
+                        }
+                    }
+                }
+            }
+        }
+
+        // 兜底：直接清除所有 frpc
+        #[cfg(windows)]
+        {
+            Command::new("taskkill")
+                .args(["/F", "/IM", "frpc.exe", "/T"])
+                .creation_flags(0x08000000)
+                .output()
+                .ok();
+        }
+        #[cfg(unix)]
+        {
+            Command::new("pkill").args(["-9", "frpc"]).output().ok();
+        }
+    });
+
     let app_state = AppState {
         process_managers: Mutex::new(HashMap::new()),
         config_managers: Mutex::new(HashMap::new()),
@@ -1650,10 +1709,22 @@ pub fn init_app(app: &mut tauri::App) {
         settings_manager: Mutex::new(Some(settings_manager)),
         version_manager: Mutex::new(Some(version_manager)),
         download_lock: tokio::sync::Mutex::new(()),
+        kill_all_frpc: Some(kill_fn),
     };
     app.manage(app_state);
 
     info!("Application initialized with multi-process support");
+}
+
+// ==================== 退出杀 frpc ====================
+
+/// 前端确认后调用：停止所有 frpc 进程并退出应用
+#[tauri::command]
+pub async fn kill_all_frpc_on_exit(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
+    let kill_fn = state.kill_all_frpc.as_ref()
+        .ok_or("退出清理回调未初始化")?;
+    kill_fn(&app);
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -9,81 +9,7 @@ mod frp;
 mod utils;
 
 use log::info;
-use std::path::PathBuf;
-use std::process::Command;
-use tauri::Manager;
-use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-
-// Windows 下 Command::creation_flags 需要 CommandExt trait 在作用域内
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-
-/// 应用退出时清理所有 frpc 子进程（含孤儿），避免退出后进程残留
-fn kill_all_frpc_on_exit(app: &tauri::AppHandle) {
-    info!("App exiting, cleaning up frpc subprocesses");
-
-    // 用 app.path() 获取配置目录（与 init_app 一致，而非 dirs::config_dir()）
-    let config_dir = app.path().app_config_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("frpc-gui");
-
-    // 扫描 servers/*/frpc.pid，按记录的 PID 精准终止（覆盖应用重启后的孤儿）
-    let servers_dir = config_dir.join("servers");
-    if let Ok(entries) = std::fs::read_dir(&servers_dir) {
-        for entry in entries.flatten() {
-            let pid_file = entry.path().join("frpc.pid");
-            if let Ok(content) = std::fs::read_to_string(&pid_file) {
-                if let Ok(pid) = content.trim().parse::<u32>() {
-                    kill_pid_by_platform(pid);
-                }
-            }
-        }
-    }
-
-    // 兜底：直接清除所有 frpc.exe（包括未被 pid 文件记录的进程）
-    #[cfg(windows)]
-    {
-        Command::new("taskkill")
-            .args(["/F", "/IM", "frpc.exe", "/T"])
-            .creation_flags(0x08000000)
-            .output()
-            .ok();
-    }
-    #[cfg(unix)]
-    {
-        Command::new("pkill").args(["-9", "frpc"]).output().ok();
-    }
-}
-
-fn kill_pid_by_platform(pid: u32) {
-    #[cfg(windows)]
-    {
-        Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .creation_flags(0x08000000)
-            .output()
-            .ok();
-    }
-    #[cfg(unix)]
-    {
-        Command::new("kill").args(["-9", &pid.to_string()]).output().ok();
-    }
-}
-
-/// 窗口关闭时弹出选择对话框，返回用户选择：
-/// true = 最小化到托盘，false = 退出并停止 frpc
-///
-/// 必须在非主线程中调用（spawn_blocking），否则会阻塞 UI
-pub fn show_close_dialog(app_handle: tauri::AppHandle) -> bool {
-    use tauri_plugin_dialog::DialogExt;
-    // blocking_show 是同步阻塞调用，需在后台线程执行
-    app_handle
-        .dialog()
-        .message("关闭时停止 FRP 进程？")
-        .title("FRPC GUI")
-        .kind(MessageDialogKind::Info)
-        .blocking_show()
-}
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -122,17 +48,17 @@ pub fn run() {
                     let _tray = TrayIconBuilder::new()
                         .icon(icon.clone())
                         .menu(&menu)
-                        .on_menu_event(|app, event| match event.id.as_ref() {
+                        .on_menu_event(|_app, event| match event.id.as_ref() {
                             "show" => {
-                                if let Some(window) = app.get_webview_window("main") {
+                                if let Some(window) = _app.get_webview_window("main") {
                                     let _ = window.show();
                                     let _ = window.set_focus();
                                 }
                             }
                             "quit" => {
                                 // 退出前清理所有 frpc 子进程（含孤儿），避免残留（S3 修复）
-                                kill_all_frpc_on_exit(app);
-                                app.exit(0);
+                                let _ = _app.emit("app-quit-requested", ());
+                                _app.exit(0);
                             }
                             _ => {}
                         })
@@ -142,28 +68,15 @@ pub fn run() {
                 }
             }
 
-            // 窗口关闭事件：弹出选择对话框
-            // 注意：闭包必须是 Send + 'static，不能捕获 app（非 Send）
-            // 方案：在闭包外 clone AppHandle 后 move 进闭包
-            let close_app = app.handle().clone();
+            // 窗口关闭事件：通知前端弹对话框，由前端决定最小化还是退出
             if let Some(window) = app.get_webview_window("main") {
+                let win = window.clone();
                 window.on_window_event(move |event| match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
-                        let app_handle = close_app.clone();
-                        // 在后台线程显示对话框，避免阻塞主事件循环
-                        let keep = std::thread::spawn(move || show_close_dialog(app_handle))
-                            .join()
-                            .unwrap_or(true); // 超时/错误默认保留（最小化）
-                        if keep {
-                            // 最小化到托盘（不关闭）
-                            api.prevent_close();
-                            let _ = close_app.get_webview_window("main").map(|w| w.hide());
-                        } else {
-                            // 退出 + 停止 frpc
-                            kill_all_frpc_on_exit(&close_app);
-                            api.prevent_close();
-                            std::process::exit(0);
-                        }
+                        // 通知前端弹选择对话框
+                        let _ = win.emit("window-close-requested", ());
+                        // 阻止默认关闭，等前端发信号
+                        api.prevent_close();
                     }
                     _ => {}
                 });
@@ -220,11 +133,19 @@ pub fn run() {
             commands::relaunch_app,
             commands::open_app_data,
             commands::select_local_file,
+            commands::check_frpc_exists,
+            commands::get_frpc_version,
+            commands::open_url,
+            commands::relaunch_app,
+            commands::open_app_data,
+            commands::select_local_file,
             commands::check_app_update,
             commands::get_local_ports,
             // 持久化数据
             commands::load_persistent_data,
             commands::save_persistent_data,
+            // 退出时杀 frpc（前端确认后再调用）
+            commands::kill_all_frpc_on_exit,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
