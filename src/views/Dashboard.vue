@@ -99,9 +99,14 @@ const proxyRequests = computed(() => {
     ? matchingProxies
     : allProxies.filter(p => p.server_id || true);
   console.log('[Dashboard] proxyRequests: sid=', sid, 'all=', allProxies.length, 'matching=', matchingProxies.length, 'candidates=', candidates.length);
+  console.log('[Dashboard] proxies data:', allProxies.map(p => ({ name: p.name, server_id: p.server_id })));
+  console.log('[Dashboard] proxyStatuses keys:', Array.from(appStore.proxyStatuses.keys()));
   return candidates.map(p => {
-    const key = `${sid}-${p.name}`;
+    // 优先用代理自己的 server_id 构建 key（兼容旧数据 server_id='' 的情况）
+    const actualSid = p.server_id || sid;
+    const key = `${actualSid}-${p.name}`;
     const ps = appStore.proxyStatuses.get(key);
+    console.log(`[Dashboard] proxy ${p.name}: actualSid=${actualSid}, key=${key}, ps=`, ps);
     return {
       name: p.name,
       type: (p.type || 'tcp').toUpperCase(),
