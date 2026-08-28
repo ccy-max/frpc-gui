@@ -2,11 +2,12 @@
 import { useAppStore } from '@/stores/app';
 import { StarOutlined } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
+import packageJson from '../../package.json';
 
 const appStore = useAppStore();
 
 const packageInfo = {
-  version: '0.1.0',
+  version: packageJson.version,
   author: 'Zero',
   license: 'MIT',
   github: 'https://github.com/ccy-max/frpc-gui',
