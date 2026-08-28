@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use tauri::{Manager, State};
 use tokio::sync::{mpsc, Mutex};
 use std::sync::Arc;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 // 应用退出时杀 frpc 进程
 pub type KillAllFrpFn = Arc<dyn Fn(&tauri::AppHandle) + Send + Sync>;
