@@ -92,8 +92,8 @@ function openAdd() {
   // 优先使用默认服务器，其次使用活动服务器
   form.value = {
     name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 8080,
-    remote_port: 8080, 
-    server_id: appStore.defaultServerId || activeServerId.value || '',
+    remote_port: 8080,
+    server_id: appStore.defaultServerId || activeServerId.value || null,
     enabled: true,
     bandwidth_limit: '', traffic_limit: 0,
     custom_domains: [], subdomain: '', locations: [],

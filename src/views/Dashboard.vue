@@ -94,8 +94,10 @@ const proxyRequests = computed(() => {
   }
   const allProxies = appStore.proxies;
   const matchingProxies = allProxies.filter(p => p.server_id === sid);
-  // 兜底：如果按 sid 过滤没结果，显示所有有关联服务器的代理
-  const candidates = matchingProxies.length > 0 ? matchingProxies : allProxies.filter(p => p.server_id);
+  // 兜底：按 sid 没结果时，显示所有有关联服务器的代理 + 无 server_id 的代理
+  const candidates = matchingProxies.length > 0
+    ? matchingProxies
+    : allProxies.filter(p => p.server_id || true);
   console.log('[Dashboard] proxyRequests: sid=', sid, 'all=', allProxies.length, 'matching=', matchingProxies.length, 'candidates=', candidates.length);
   return candidates.map(p => {
     const key = `${sid}-${p.name}`;
