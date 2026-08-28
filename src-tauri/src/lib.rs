@@ -12,6 +12,7 @@ use log::info;
 use std::path::PathBuf;
 use std::process::Command;
 use tauri::Manager;
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 // Windows 下 Command::creation_flags 需要 CommandExt trait 在作用域内
 #[cfg(windows)]
@@ -67,6 +68,21 @@ fn kill_pid_by_platform(pid: u32) {
     {
         Command::new("kill").args(["-9", &pid.to_string()]).output().ok();
     }
+}
+
+/// 窗口关闭时弹出选择对话框，返回用户选择：
+/// true = 最小化到托盘，false = 退出并停止 frpc
+///
+/// 必须在非主线程中调用（spawn_blocking），否则会阻塞 UI
+pub fn show_close_dialog(app_handle: tauri::AppHandle) -> bool {
+    use tauri_plugin_dialog::DialogExt;
+    // blocking_show 是同步阻塞调用，需在后台线程执行
+    app_handle
+        .dialog()
+        .message("关闭时停止 FRP 进程？")
+        .title("FRPC GUI")
+        .kind(MessageDialogKind::Info)
+        .blocking_show()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -125,6 +141,34 @@ pub fn run() {
                     log::warn!("No default window icon found, skipping tray icon");
                 }
             }
+
+            // 窗口关闭事件：弹出选择对话框
+            // 注意：闭包必须是 Send + 'static，不能捕获 app（非 Send）
+            // 方案：在闭包外 clone AppHandle 后 move 进闭包
+            let close_app = app.handle().clone();
+            if let Some(window) = app.get_webview_window("main") {
+                window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        let app_handle = close_app.clone();
+                        // 在后台线程显示对话框，避免阻塞主事件循环
+                        let keep = std::thread::spawn(move || show_close_dialog(app_handle))
+                            .join()
+                            .unwrap_or(true); // 超时/错误默认保留（最小化）
+                        if keep {
+                            // 最小化到托盘（不关闭）
+                            api.prevent_close();
+                            let _ = close_app.get_webview_window("main").map(|w| w.hide());
+                        } else {
+                            // 退出 + 停止 frpc
+                            kill_all_frpc_on_exit(&close_app);
+                            api.prevent_close();
+                            std::process::exit(0);
+                        }
+                    }
+                    _ => {}
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
