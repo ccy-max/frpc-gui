@@ -89,7 +89,7 @@ function tickUptime() {
 const proxyRequests = computed(() => {
   const sid = appStore.defaultServerId || appStore.servers[0]?.id;
   if (!sid) {
-    console.warn('[Dashboard] proxyRequests: sid 为空, servers=', appStore.servers.map(s => ({id: s.id, name: s.name})));
+    console.warn('[Dashboard] proxyRequests: sid 为空');
     return [];
   }
   const allProxies = appStore.proxies;
@@ -98,15 +98,13 @@ const proxyRequests = computed(() => {
   const candidates = matchingProxies.length > 0
     ? matchingProxies
     : allProxies.filter(p => p.server_id || true);
-  console.log('[Dashboard] proxyRequests: sid=', sid, 'all=', allProxies.length, 'matching=', matchingProxies.length, 'candidates=', candidates.length);
-  console.log('[Dashboard] proxies data:', allProxies.map(p => ({ name: p.name, server_id: p.server_id })));
-  console.log('[Dashboard] proxyStatuses keys:', Array.from(appStore.proxyStatuses.keys()));
-  return candidates.map(p => {
+  
+  const result = candidates.map(p => {
     // 优先用代理自己的 server_id 构建 key（兼容旧数据 server_id='' 的情况）
     const actualSid = p.server_id || sid;
     const key = `${actualSid}-${p.name}`;
     const ps = appStore.proxyStatuses.get(key);
-    console.log(`[Dashboard] proxy ${p.name}: actualSid=${actualSid}, key=${key}, ps=`, ps);
+    console.log(`[Dashboard] proxy=${p.name}, server_id=${p.server_id}, actualSid=${actualSid}, key=${key}, ps.state=${ps?.state}, traffic=${ps?.today_traffic_in}`);
     return {
       name: p.name,
       type: (p.type || 'tcp').toUpperCase(),
@@ -115,6 +113,9 @@ const proxyRequests = computed(() => {
       trafficOut: ps?.today_traffic_out || 0,
     };
   });
+  
+  console.log('[Dashboard] proxyRequests result:', result);
+  return result;
 });
 
 // 默认服务器总流量

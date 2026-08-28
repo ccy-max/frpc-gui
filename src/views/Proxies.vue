@@ -280,7 +280,9 @@ const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.t
 // 获取代理状态
 function getProxyState(proxy: any): string {
   if (!proxy.enabled) return 'disabled';
-  const status = appStore.getProxyStatus(proxy.server_id || '', proxy.name);
+  // 优先用代理自己的 server_id（兼容旧数据 null/'' 的情况）
+  const sid = proxy.server_id || appStore.defaultServerId || appStore.servers[0]?.id || '';
+  const status = appStore.getProxyStatus(sid, proxy.name);
   if (!status) return proxy.enabled ? 'online' : 'offline';
   return status.state || (proxy.enabled ? 'online' : 'offline');
 }
@@ -312,13 +314,15 @@ function getProxyStateColor(proxy: any): string {
 
 // 获取今日上传流量
 function getProxyTodayTrafficOut(proxy: any): number {
-  const status = appStore.getProxyStatus(proxy.server_id || '', proxy.name);
+  const sid = proxy.server_id || appStore.defaultServerId || appStore.servers[0]?.id || '';
+  const status = appStore.getProxyStatus(sid, proxy.name);
   return status?.today_traffic_out || 0;
 }
 
 // 获取今日下载流量
 function getProxyTodayTrafficIn(proxy: any): number {
-  const status = appStore.getProxyStatus(proxy.server_id || '', proxy.name);
+  const sid = proxy.server_id || appStore.defaultServerId || appStore.servers[0]?.id || '';
+  const status = appStore.getProxyStatus(sid, proxy.name);
   return status?.today_traffic_in || 0;
 }
 

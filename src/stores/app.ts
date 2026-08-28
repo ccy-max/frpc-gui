@@ -351,12 +351,17 @@ export const useAppStore = defineStore('app', () => {
 
     await invoke('start_server', { serverId, config });
     frpcStartedAt.value = Date.now();
+    addLog({ timestamp: Date.now(), level: 'info', message: `服务器 "${server.name}" 已启动`, source: 'app' });
     await refreshServerStatus(serverId);
   }
 
   async function stopServer(serverId: string) {
+    const server = servers.value.find(s => s.id === serverId);
     await invoke('stop_server', { serverId });
     frpcStartedAt.value = null;
+    if (server) {
+      addLog({ timestamp: Date.now(), level: 'info', message: `服务器 "${server.name}" 已停止`, source: 'app' });
+    }
     await refreshServerStatus(serverId);
   }
 
@@ -370,6 +375,7 @@ export const useAppStore = defineStore('app', () => {
 
     await invoke('restart_server', { serverId, config });
     frpcStartedAt.value = Date.now();
+    addLog({ timestamp: Date.now(), level: 'info', message: `服务器 "${server.name}" 已重启`, source: 'app' });
     await refreshServerStatus(serverId);
   }
 
