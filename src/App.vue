@@ -16,11 +16,19 @@ function onContextMenu(e: MouseEvent) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  // F5 / Ctrl+R / Ctrl+Shift+R / Cmd+R（Mac）
+  // F12 - 开启开发者工具（生产环境也放行，方便调试）
+  if (e.key === 'F12') {
+    return; // 不拦截，让 WebView 默认处理
+  }
+  // F5 / Ctrl+R / Ctrl+Shift+R / Cmd+R（Mac） - 阻止页面刷新
   if (e.key === 'F5' ||
       (e.ctrlKey && e.key.toLowerCase() === 'r') ||
       (e.metaKey && e.key.toLowerCase() === 'r')) {
     e.preventDefault();
+  }
+  // Ctrl+Shift+I - 开启开发者工具（备用快捷键）
+  if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'i') {
+    return; // 不拦截
   }
 }
 
