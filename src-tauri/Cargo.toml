@@ -1,6 +1,6 @@
 [package]
 name = "frpc-gui"
-version = "1.0.18"
+version = "1.0.19"
 description = "FRP 内网穿透桌面管理应用 - 基于 Tauri v2 + Vue 3"
 authors = ["Zero <zero@example.com>"]
 edition = "2021"
