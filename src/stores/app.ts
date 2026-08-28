@@ -403,6 +403,7 @@ export const useAppStore = defineStore('app', () => {
   async function refreshProxyStatus() {
     try {
       const statuses = await invoke<any[]>('get_all_proxy_status');
+      console.log('[refreshProxyStatus] got statuses:', statuses);
 
       // 状态变化检测：对比新旧快照，向后端持久化连接/断开事件
       const prev = proxyStatuses.value;

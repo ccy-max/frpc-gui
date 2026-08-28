@@ -88,9 +88,16 @@ function tickUptime() {
 // 数据源：proxyStatuses（5s 轮询）+ serverTraffic（5s 轮询），不依赖 frpc stdout 管道
 const proxyRequests = computed(() => {
   const sid = appStore.defaultServerId || appStore.servers[0]?.id;
-  if (!sid) return [];
-  const serverProxies = appStore.proxies.filter(p => p.server_id === sid);
-  return serverProxies.map(p => {
+  if (!sid) {
+    console.warn('[Dashboard] proxyRequests: sid 为空, servers=', appStore.servers.map(s => ({id: s.id, name: s.name})));
+    return [];
+  }
+  const allProxies = appStore.proxies;
+  const matchingProxies = allProxies.filter(p => p.server_id === sid);
+  // 兜底：如果按 sid 过滤没结果，显示所有有关联服务器的代理
+  const candidates = matchingProxies.length > 0 ? matchingProxies : allProxies.filter(p => p.server_id);
+  console.log('[Dashboard] proxyRequests: sid=', sid, 'all=', allProxies.length, 'matching=', matchingProxies.length, 'candidates=', candidates.length);
+  return candidates.map(p => {
     const key = `${sid}-${p.name}`;
     const ps = appStore.proxyStatuses.get(key);
     return {
