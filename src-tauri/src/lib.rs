@@ -69,10 +69,22 @@ pub fn run() {
             }
 
             // 窗口关闭事件：通知前端弹对话框，由前端决定最小化还是退出
+            // 用 flag 防止 prevent_close + window.close() 死锁（第二次直接放行）
+            use std::sync::{Arc, Mutex};
+            let close_shown = Arc::new(Mutex::new(false));
             if let Some(window) = app.get_webview_window("main") {
                 let win = window.clone();
+                let shown = Arc::clone(&close_shown);
                 window.on_window_event(move |event| match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
+                        let mut shown_ref = shown.lock().unwrap();
+                        if *shown_ref {
+                            // 对话框已弹过，用户确认后第二次关闭 → 直接放行
+                            drop(shown_ref);
+                            return;
+                        }
+                        *shown_ref = true;
+                        drop(shown_ref);
                         // 通知前端弹选择对话框
                         let _ = win.emit("window-close-requested", ());
                         // 阻止默认关闭，等前端发信号
