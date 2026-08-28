@@ -156,8 +156,9 @@ pub fn run() {
             // 持久化数据
             commands::load_persistent_data,
             commands::save_persistent_data,
-            // 退出时杀 frpc（前端确认后再调用）
+            // 退出杀 frpc + 进程退出
             commands::kill_all_frpc_on_exit,
+            commands::exit_app,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

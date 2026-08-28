@@ -1729,6 +1729,15 @@ pub async fn kill_all_frpc_on_exit(app: tauri::AppHandle, state: State<'_, AppSt
     Ok(true)
 }
 
+/// 杀 frpc 并立即退出应用（替代 window.close()，避免 CloseRequested 死锁）
+#[tauri::command]
+pub async fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(kill_fn) = &state.kill_all_frpc {
+        kill_fn(&app);
+    }
+    std::process::exit(0);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

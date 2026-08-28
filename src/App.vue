@@ -42,13 +42,10 @@ onMounted(async () => {
       '确认退出'
     );
     if (confirmed) {
-      // 用户选择退出：杀 frpc + 通知后端真正退出
-      await invoke('kill_all_frpc_on_exit').catch(console.error);
-      // 发送 quit 事件让后端执行 app.exit(0)
-      window.close();
+      // 用户选择退出：杀 frpc + 直接退出（不调 window.close() 避免死锁）
+      await invoke('exit_app').catch(console.error);
     } else {
       // 用户选择最小化：保持窗口隐藏
-      // 后端已 prevent_close，前端只需隐藏窗口
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       getCurrentWindow().hide();
     }
@@ -61,8 +58,7 @@ onMounted(async () => {
       '确认退出'
     );
     if (confirmed) {
-      await invoke('kill_all_frpc_on_exit').catch(console.error);
-      window.close();
+      await invoke('exit_app').catch(console.error);
     }
   });
 });
