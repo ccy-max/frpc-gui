@@ -159,6 +159,7 @@ pub fn run() {
             // 退出杀 frpc + 进程退出
             commands::kill_all_frpc_on_exit,
             commands::exit_app,
+            commands::open_devtools,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

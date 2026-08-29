@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useRouter, useRoute } from 'vue-router';
+import { invoke } from '@tauri-apps/api/core';
 import {
   DashboardOutlined,
   CloudServerOutlined,
@@ -10,6 +11,7 @@ import {
   FileTextOutlined,
   SettingOutlined,
   InfoCircleOutlined,
+  BugOutlined,
 } from '@ant-design/icons-vue';
 
 const appStore = useAppStore();
@@ -38,6 +40,14 @@ watch(() => route.path, (newPath) => {
 const handleMenuSelect = ({ key }: { key: string }) => {
   router.push(`/${key}`);
 };
+
+async function openDevtools() {
+  try {
+    await invoke('open_devtools');
+  } catch (e) {
+    console.error('打开开发者工具失败:', e);
+  }
+}
 </script>
 
 <template>
@@ -85,6 +95,10 @@ const handleMenuSelect = ({ key }: { key: string }) => {
             <span class="status-value">{{ appStore.activeProxiesCount }} 个活跃代理</span>
           </div>
         </div>
+        <a-button size="small" block @click="openDevtools" style="margin-top: 8px; background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.15); color: rgba(255,255,255,0.7);">
+          <template #icon><BugOutlined /></template>
+          调试控制台
+        </a-button>
       </div>
     </a-layout-sider>
 

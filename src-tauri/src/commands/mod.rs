@@ -1738,6 +1738,18 @@ pub async fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) -> Resu
     std::process::exit(0);
 }
 
+/// 打开开发者工具（programmatic，不依赖 F12 键盘事件）
+#[tauri::command]
+pub async fn open_devtools(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        window.open_devtools();
+        Ok(())
+    } else {
+        Err("找不到主窗口".to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
