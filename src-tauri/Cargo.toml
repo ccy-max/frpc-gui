@@ -1,6 +1,6 @@
 [package]
 name = "frpc-gui"
-version = "1.0.19"
+version = "1.0.28"
 description = "FRP 内网穿透桌面管理应用 - 基于 Tauri v2 + Vue 3"
 authors = ["Zero <zero@example.com>"]
 edition = "2021"
@@ -14,7 +14,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "devtools"] }
 tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-fs = "2"
