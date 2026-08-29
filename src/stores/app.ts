@@ -798,6 +798,8 @@ export const useAppStore = defineStore('app', () => {
     frpConfig, processStatus, logs, frpcLogContent, autoScrollLogs,
     servers, proxies, versions, downloadedVersions, localPorts, mirrors,
     serverStatuses,
+    proxyStatuses,
+    serverTraffic,
     // Getters
     isRunning, frpcStartedAt, liveLogs, appendLiveLog, clearLiveLogs, loadRecentLogsFromDisk, runningServersCount, activeProxies, activeProxiesCount,
     // Settings

@@ -242,17 +242,6 @@ onUnmounted(() => {
           <span class="refresh-hint">每 5 秒自动刷新</span>
         </div>
       </template>
-      <!-- 调试信息 -->
-      <div style="background: #fffbe6; padding: 12px; margin-bottom: 12px; font-size: 12px; border: 1px solid #ffe58f;">
-        <div><strong>调试：</strong></div>
-        <div>defaultServerId: {{ appStore.defaultServerId }}</div>
-        <div>servers[0]?.id: {{ appStore.servers[0]?.id }}</div>
-        <div>proxies.length: {{ appStore.proxies.length }}</div>
-        <div>proxyStatuses.size: {{ appStore.proxyStatuses.size }}</div>
-        <div>proxyRequests.length: {{ proxyRequests.length }}</div>
-        <div>proxies 数据：{{ JSON.stringify(appStore.proxies.map(p => ({ name: p.name, server_id: p.server_id }))) }}</div>
-        <div>proxyStatuses keys: {{ Array.from(appStore.proxyStatuses.keys()).join(', ') }}</div>
-      </div>
       <div class="proxy-list">
         <div v-if="proxyRequests.length === 0" class="proxy-empty">
           暂无代理 —— 添加代理并启动 FRP 后此处将显示代理请求状态
