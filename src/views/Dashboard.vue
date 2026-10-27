@@ -88,23 +88,17 @@ function tickUptime() {
 // 数据源：proxyStatuses（5s 轮询）+ serverTraffic（5s 轮询），不依赖 frpc stdout 管道
 const proxyRequests = computed(() => {
   const sid = appStore.defaultServerId || appStore.servers[0]?.id;
-  if (!sid) {
-    console.warn('[Dashboard] proxyRequests: sid 为空');
-    return [];
-  }
+  if (!sid) return [];
   const allProxies = appStore.proxies;
   const matchingProxies = allProxies.filter(p => p.server_id === sid);
-  // 兜底：按 sid 没结果时，显示所有有关联服务器的代理 + 无 server_id 的代理
-  const candidates = matchingProxies.length > 0
-    ? matchingProxies
-    : allProxies.filter(p => p.server_id || true);
-  
-  const result = candidates.map(p => {
+  // 兜底：按 sid 没匹配到时，显示所有代理（旧数据可能缺失 server_id）
+  const candidates = matchingProxies.length > 0 ? matchingProxies : allProxies;
+
+  return candidates.map(p => {
     // 优先用代理自己的 server_id 构建 key（兼容旧数据 server_id='' 的情况）
     const actualSid = p.server_id || sid;
     const key = `${actualSid}-${p.name}`;
     const ps = appStore.proxyStatuses.get(key);
-    console.log(`[Dashboard] proxy=${p.name}, server_id=${p.server_id}, actualSid=${actualSid}, key=${key}, ps.state=${ps?.state}, traffic=${ps?.today_traffic_in}`);
     return {
       name: p.name,
       type: (p.type || 'tcp').toUpperCase(),
@@ -113,9 +107,6 @@ const proxyRequests = computed(() => {
       trafficOut: ps?.today_traffic_out || 0,
     };
   });
-  
-  console.log('[Dashboard] proxyRequests result:', result);
-  return result;
 });
 
 // 默认服务器总流量

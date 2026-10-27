@@ -1,12 +1,16 @@
 // Tauri API Mock - 用于浏览器预览
 // 在浏览器中运行时拦截所有 invoke 调用
 
+export {}; // 使本文件成为模块，允许 declare global 类型增强
+
 declare global {
   interface Window {
     __TAURI_MOCK__?: {
       invoke: (cmd: string, args?: any) => Promise<any>;
     };
     invoke?: (cmd: string, args?: any) => Promise<any>;
+    /** AMD define 钩子（仅浏览器预览 mock 用） */
+    define?: (...args: any[]) => any;
   }
 }
 

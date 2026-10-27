@@ -30,5 +30,6 @@
     "skipTemplateCodegen": true
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"],
+  "exclude": ["src/i18n"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

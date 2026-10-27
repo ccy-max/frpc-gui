@@ -1303,7 +1303,16 @@ pub async fn get_server_traffic(
             }
         }
         None => {
-            Err(format!("服务器 {} 未找到", server_id))
+            // 应用重启后 process_managers 为空，但服务器配置仍在持久化里——
+            // 这不是错误。返回零值统计，避免前端每 5s 轮询刷屏 "服务器未找到" 报错。
+            Ok(TrafficStatistics {
+                server_id,
+                total_traffic_in: 0,
+                total_traffic_out: 0,
+                today_traffic_in: 0,
+                today_traffic_out: 0,
+                proxies: Vec::new(),
+            })
         }
     }
 }

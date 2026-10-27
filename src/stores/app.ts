@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
-import type { FrpConfig, ProcessStatus, LogEntry } from '@/types';
+import type { FrpConfig, ProcessStatus, LogEntry, LocalPort } from '@/types';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 
@@ -409,7 +409,6 @@ export const useAppStore = defineStore('app', () => {
   async function refreshProxyStatus() {
     try {
       const statuses = await invoke<any[]>('get_all_proxy_status');
-      console.log('[refreshProxyStatus] got statuses:', statuses);
 
       // 状态变化检测：对比新旧快照，向后端持久化连接/断开事件
       const prev = proxyStatuses.value;
@@ -443,17 +442,21 @@ export const useAppStore = defineStore('app', () => {
     try {
       if (serverId) {
         const traffic = await invoke('get_server_traffic', { serverId });
-        serverTraffic.value.set(serverId, traffic);
+        // 触发响应式：用新 Map 替换（ref<Map> 的 .set() 不会通知 computed 重算）
+        serverTraffic.value = new Map(serverTraffic.value).set(serverId, traffic);
       } else {
-        // 刷新所有服务器的流量
+        // 刷新所有服务器的流量（整体替换保证响应式）
+        const next = new Map(serverTraffic.value);
         for (const server of servers.value) {
           try {
             const traffic = await invoke('get_server_traffic', { serverId: server.id });
-            serverTraffic.value.set(server.id, traffic);
+            next.set(server.id, traffic);
           } catch (e) {
-            console.error(`Failed to get traffic for server ${server.id}:`, e);
+            // 后端已保证未运行时返回零值，这里只可能是真实异常；静默降级不刷屏
+            console.warn(`[traffic] server ${server.id} 获取失败:`, e);
           }
         }
+        serverTraffic.value = next;
       }
     } catch (e) {
       console.error('Failed to refresh server traffic:', e);
