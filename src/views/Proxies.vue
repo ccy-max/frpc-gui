@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAppStore } from '@/stores/app';
-import { PlusOutlined, AppstoreOutlined, GlobalOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons-vue';
+import { PlusOutlined, AppstoreOutlined, GlobalOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ArrowUpOutlined, ArrowDownOutlined, MoreOutlined, CopyOutlined, BarsOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 
 const appStore = useAppStore();
-const searchKeyword = ref('');
-const serverFilter = ref<string>('');
+// D4：搜索/筛选状态持久化（切页回来不重置）
+const searchKeyword = ref(localStorage.getItem('proxySearch') || '');
+const serverFilter = ref<string>(localStorage.getItem('proxyServerFilter') || '');
+watch(searchKeyword, v => localStorage.setItem('proxySearch', v));
+watch(serverFilter, v => localStorage.setItem('proxyServerFilter', v));
 const modalVisible = ref(false);
 const editingName = ref<string | null>(null);
 const selectedProxies = ref<Set<string>>(new Set()); // 批量选择
@@ -74,6 +77,80 @@ const filteredProxies = computed(() => {
   return result;
 });
 
+// A3：渐进渲染——DOM 只挂前 visibleCount 张卡片，批量选择仍作用于全量数据
+const PAGE_SIZE = 24;
+const visibleCount = ref(PAGE_SIZE);
+const visibleProxies = computed(() => filteredProxies.value.slice(0, visibleCount.value));
+watch([searchKeyword, serverFilter], () => { visibleCount.value = PAGE_SIZE; });
+
+// N5：卡片/列表双视图切换（持久化到 localStorage）
+const viewMode = ref<'card' | 'list'>(
+  (localStorage.getItem('proxyViewMode') as 'card' | 'list') || 'card',
+);
+watch(viewMode, (v) => localStorage.setItem('proxyViewMode', v));
+
+// N5：列表视图列定义
+const listColumns = [
+  { title: '名称', dataIndex: 'name', key: 'name', width: 160 },
+  { title: '类型', dataIndex: 'type', key: 'type', width: 90 },
+  { title: '服务器', key: 'server', width: 120 },
+  { title: '状态', key: 'state', width: 110 },
+  { title: '地址映射', key: 'addr', width: 220 },
+  { title: '今日流量', key: 'traffic', width: 160 },
+  { title: '操作', key: 'action', width: 240 },
+];
+
+// N3：批量端口创建（TCP/UDP 8000-8010 一次建多条）
+const batchPortVisible = ref(false);
+const batchForm = ref<any>({
+  server_id: '', type: 'tcp', namePrefix: 'port',
+  localIp: '127.0.0.1', localStart: 8080, remoteStart: 8080, count: 5,
+});
+function openBatchPorts() {
+  batchForm.value.server_id = appStore.defaultServerId || activeServerId.value || '';
+  batchPortVisible.value = true;
+}
+function handleBatchPorts() {
+  const f = batchForm.value;
+  if (!f.server_id) { message.warning('请选择服务器'); return; }
+  if (f.count < 1 || f.count > 100) { message.warning('数量需在 1-100 之间'); return; }
+  if (f.remoteStart + f.count - 1 > 65535) { message.error('远程端口区间超出范围'); return; }
+  let created = 0, skipped = 0;
+  for (let i = 0; i < f.count; i++) {
+    const rp = f.remoteStart + i;
+    const lp = f.localStart + i;
+    const name = `${f.namePrefix}-${rp}`;
+    if (appStore.proxies.some(p => p.name === name)) { skipped++; continue; }
+    appStore.addProxy({
+      name, type: f.type, local_ip: f.localIp, local_port: lp, remote_port: rp,
+      server_id: f.server_id, enabled: true,
+    });
+    created++;
+  }
+  batchPortVisible.value = false;
+  message.success(`批量创建 ${created} 个代理${skipped ? `，跳过重名 ${skipped} 个` : ''}`);
+}
+
+// B4x：复制单个代理的 TOML 配置片段
+async function copyProxyToml(proxy: any) {
+  const lines: string[] = [`[[proxies]]`, `name = "${proxy.name}"`, `type = "${proxy.type}"`];
+  if (proxy.local_ip) lines.push(`localIP = "${proxy.local_ip}"`);
+  if (proxy.local_port) lines.push(`localPort = ${proxy.local_port}`);
+  if (proxy.remote_port) lines.push(`remotePort = ${proxy.remote_port}`);
+  if (proxy.custom_domains?.length) lines.push(`customDomains = ${JSON.stringify(proxy.custom_domains)}`);
+  if (proxy.subdomain) lines.push(`subdomain = "${proxy.subdomain}"`);
+  if (proxy.secret_key) lines.push(`secretKey = "${proxy.secret_key}"`);
+  if (proxy.use_encryption) lines.push(`useEncryption = true`);
+  if (proxy.use_compression) lines.push(`useCompression = true`);
+  const text = lines.join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    message.success('已复制 TOML 配置片段');
+  } catch {
+    message.error('复制失败');
+  }
+}
+
 // 获取服务器名称
 function getServerName(serverId: string): string {
   const server = appStore.servers.find(s => s.id === serverId);
@@ -85,6 +162,11 @@ const activeServerId = computed(() => {
   const active = appStore.servers.find(s => s.active);
   return active ? active.id : '';
 });
+
+// B1x：命令面板"新建代理"入口
+function onOpenAddProxy() { openAdd(); }
+onMounted(() => window.addEventListener('open-add-proxy', onOpenAddProxy));
+onUnmounted(() => window.removeEventListener('open-add-proxy', onOpenAddProxy));
 
 function openAdd() {
   modalVisible.value = true;
@@ -106,8 +188,7 @@ function openAdd() {
 }
 
 function openEdit(proxy: any) {
-  modalVisible.value = true;
-  editingName.value = proxy.name;
+  modalVisible.value = true;  editingName.value = proxy.name;
   form.value = { ...proxy };
 }
 
@@ -171,14 +252,30 @@ async function handleSave() {
 }
 
 function handleDelete(proxy: any) {
+  // B3x：确认文案带对象名
   Modal.confirm({
-    title: '确认删除',
-    content: `确定要删除代理 "${proxy.name}" 吗？`,
+    title: '删除代理',
+    content: `确定删除代理「${proxy.name}」？删除后不可恢复。`,
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
     onOk: () => {
       appStore.deleteProxy(proxy.name);
-      message.success('删除成功');
+      message.success(`代理「${proxy.name}」已删除`);
     },
   });
+}
+
+// B2x：复制代理——预填表单，名称自动加 -copy 后缀
+function handleCopy(proxy: any) {
+  editingName.value = null;
+  let copyName = `${proxy.name}-copy`;
+  let i = 2;
+  while (appStore.proxies.some(p => p.name === copyName)) {
+    copyName = `${proxy.name}-copy${i++}`;
+  }
+  form.value = { ...JSON.parse(JSON.stringify(proxy)), name: copyName };
+  modalVisible.value = true;
 }
 
 async function toggleProxy(proxy: any) {
@@ -354,10 +451,20 @@ const selectAllChecked = computed({
         <AppstoreOutlined class="header-icon" />
         代理管理
       </h1>
-      <a-button type="primary" @click="openAdd">
-        <template #icon><PlusOutlined /></template>
-        添加代理
-      </a-button>
+      <a-space>
+        <a-radio-group v-model:value="viewMode" button-style="solid" size="small">
+          <a-radio-button value="card"><AppstoreOutlined /></a-radio-button>
+          <a-radio-button value="list"><BarsOutlined /></a-radio-button>
+        </a-radio-group>
+        <a-button @click="openBatchPorts">
+          <template #icon><ThunderboltOutlined /></template>
+          批量端口
+        </a-button>
+        <a-button type="primary" @click="openAdd">
+          <template #icon><PlusOutlined /></template>
+          添加代理
+        </a-button>
+      </a-space>
     </div>
 
     <!-- 搜索和过滤 -->
@@ -429,10 +536,10 @@ const selectAllChecked = computed({
       </a-empty>
     </div>
 
-    <!-- 代理卡片网格 -->
-    <div v-else class="proxy-grid">
+    <!-- 代理卡片网格（N5：card 视图）-->
+    <div v-else-if="viewMode === 'card'" class="proxy-grid">
       <div 
-        v-for="proxy in filteredProxies" 
+        v-for="proxy in visibleProxies" 
         :key="proxy.name"
         class="proxy-card-wrapper"
         :class="{ 'proxy-selected': selectedProxies.has(proxy.name) }"
@@ -526,13 +633,105 @@ const selectAllChecked = computed({
         <template #actions>
           <a @click="toggleProxy(proxy)">{{ proxy.enabled ? '停止' : '启动' }}</a>
           <a @click="openEdit(proxy)">编辑</a>
-          <a-popconfirm title="确定删除？" @confirm="handleDelete(proxy)">
-            <a class="text-danger">删除</a>
-          </a-popconfirm>
+          <a-dropdown>
+            <a @click="(e: MouseEvent) => e.preventDefault()"><MoreOutlined /> 更多</a>
+            <template #overlay>
+              <a-menu>
+                <a-menu-item key="copy" @click="handleCopy(proxy)">
+                  <CopyOutlined /> 复制为新代理
+                </a-menu-item>
+                <a-menu-item key="delete" @click="handleDelete(proxy)">
+                  <span style="color: #ef4444;">删除「{{ proxy.name }}」</span>
+                </a-menu-item>
+              </a-menu>
+            </template>
+          </a-dropdown>
         </template>
       </a-card>
       </div>
     </div>
+
+    <!-- A3：渐进渲染"显示更多" -->
+    <div v-if="viewMode === 'card' && visibleCount < filteredProxies.length" style="text-align: center; margin: 16px 0;">
+      <a-button @click="visibleCount += PAGE_SIZE">
+        显示更多（还有 {{ filteredProxies.length - visibleCount }} 个）
+      </a-button>
+    </div>
+
+    <!-- N5：列表视图 -->
+    <a-table
+      v-else-if="viewMode === 'list'"
+      :data-source="filteredProxies"
+      :columns="listColumns"
+      row-key="name"
+      size="middle"
+      :pagination="{ pageSize: 20, hideOnSinglePage: true }"
+      class="proxy-table"
+    >
+      <template #bodyCell="{ column, record }">
+        <template v-if="column.key === 'type'">
+          <a-tag :color="getProxyTypeColor(record.type)">{{ record.type.toUpperCase() }}</a-tag>
+        </template>
+        <template v-else-if="column.key === 'server'">
+          <a-tag :color="record.server_id ? 'blue' : 'default'">{{ getServerName(record.server_id) }}</a-tag>
+        </template>
+        <template v-else-if="column.key === 'state'">
+          <a-tag :color="getProxyStateColor(record)">
+            <template #icon><CheckCircleOutlined v-if="isProxyOnline(record)" /><CloseCircleOutlined v-else /></template>
+            {{ getProxyStateText(record) }}
+          </a-tag>
+        </template>
+        <template v-else-if="column.key === 'addr'">
+          <span class="mono">{{ record.local_ip }}:{{ record.local_port }} → :{{ record.remote_port }}</span>
+        </template>
+        <template v-else-if="column.key === 'traffic'">
+          <span class="mono">↑{{ formatTraffic(getProxyTodayTrafficOut(record)) }} ↓{{ formatTraffic(getProxyTodayTrafficIn(record)) }}</span>
+        </template>
+        <template v-else-if="column.key === 'action'">
+          <a-space>
+            <a @click="toggleProxy(record)">{{ record.enabled ? '停止' : '启动' }}</a>
+            <a @click="openEdit(record)">编辑</a>
+            <a @click="copyProxyToml(record)">复制TOML</a>
+            <a style="color:#ef4444;" @click="handleDelete(record)">删除</a>
+          </a-space>
+        </template>
+      </template>
+    </a-table>
+
+    <!-- N3：批量端口创建弹窗 -->
+    <a-modal v-model:open="batchPortVisible" title="批量端口创建" @ok="handleBatchPorts" width="520px">
+      <a-form layout="vertical">
+        <a-form-item label="目标服务器" required>
+          <a-select v-model:value="batchForm.server_id" placeholder="选择服务器">
+            <a-select-option v-for="s in appStore.servers" :key="s.id" :value="s.id">{{ s.name }}</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-row :gutter="12">
+          <a-col :span="12">
+            <a-form-item label="类型">
+              <a-select v-model:value="batchForm.type">
+                <a-select-option value="tcp">TCP</a-select-option>
+                <a-select-option value="udp">UDP</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="名称前缀">
+              <a-input v-model:value="batchForm.namePrefix" placeholder="port" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="本地 IP">
+          <a-input v-model:value="batchForm.localIp" placeholder="127.0.0.1" />
+        </a-form-item>
+        <a-row :gutter="12">
+          <a-col :span="8"><a-form-item label="本地起始端口"><a-input-number v-model:value="batchForm.localStart" :min="1" :max="65535" style="width:100%" /></a-form-item></a-col>
+          <a-col :span="8"><a-form-item label="远程起始端口"><a-input-number v-model:value="batchForm.remoteStart" :min="1" :max="65535" style="width:100%" /></a-form-item></a-col>
+          <a-col :span="8"><a-form-item label="数量"><a-input-number v-model:value="batchForm.count" :min="1" :max="100" style="width:100%" /></a-form-item></a-col>
+        </a-row>
+        <div class="form-help">将创建 {{ batchForm.count }} 个代理：远程端口 {{ batchForm.remoteStart }}-{{ batchForm.remoteStart + batchForm.count - 1 }}，命名为 前缀-远程端口</div>
+      </a-form>
+    </a-modal>
 
     <!-- 编辑/添加对话框 -->
     <a-modal

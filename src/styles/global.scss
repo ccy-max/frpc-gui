@@ -1,4 +1,76 @@
-/* 全局样式 */
+/* 全局样式 —— C1 设计 Token 体系 */
+
+/* ═══ Design Tokens（亮色默认值）═══ */
+:root {
+  /* 品牌 */
+  --brand-primary: #2563eb;
+  --brand-secondary: #7c3aed;
+  --brand-gradient: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+
+  /* 文本 */
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --text-disabled: #94a3b8;
+
+  /* 背景 */
+  --bg-page: #f1f5f9;
+  --bg-card: #ffffff;
+  --bg-subtle: #f8fafc;
+  --bg-hover: #f1f5f9;
+  --bg-code: #1e293b;
+
+  /* 描边 */
+  --border-color: #e2e8f0;
+  --border-strong: #cbd5e1;
+
+  /* 语义色 */
+  --success: #10b981;
+  --warning: #fa8c16;
+  --danger: #ef4444;
+  --info: #3b82f6;
+
+  /* 间距（8px rhythm）*/
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* ═══ 深色模式覆盖（html.dark 由 store.applyTheme 切换）═══ */
+html.dark {
+  --text-primary: #e2e8f0;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --text-disabled: #64748b;
+
+  --bg-page: #0f172a;
+  --bg-card: #1e293b;
+  --bg-subtle: #16213a;
+  --bg-hover: #26334d;
+  --bg-code: #0b1220;
+
+  --border-color: #334155;
+  --border-strong: #475569;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  color-scheme: dark;
+}
 
 * {
   margin: 0;
@@ -11,6 +83,9 @@ html, body {
   font-size: 14px;
   line-height: 1.5;
   overflow: hidden;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 #app {
@@ -23,8 +98,8 @@ html, body {
 /* 滚动条 */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-disabled); }
 
 /* 工具类 */
 .flex-center { display: flex; align-items: center; justify-content: center; }
@@ -47,4 +122,95 @@ html, body {
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 13px;
   line-height: 1.5;
+}
+
+/* ═══ C2 状态呼吸灯 ═══ */
+.status-dot {
+  &.running {
+    background: var(--success);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+    animation: pulse-green 2s infinite;
+  }
+}
+
+@keyframes pulse-green {
+  0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55); }
+  70%  { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.running { animation: none; }
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+/* ═══ 深色模式全局适配层（覆盖各页面 scoped 硬编码浅色）═══ */
+html.dark {
+  /* 页面容器背景 */
+  .page-container, .logs-page, .about-page, .settings-page, .versions-page, .dashboard-page {
+    background: var(--bg-page);
+  }
+
+  /* 卡片 */
+  .ant-card {
+    background: var(--bg-card);
+    border-color: var(--border-color);
+
+    .ant-card-head {
+      background: transparent;
+      border-bottom-color: var(--border-color);
+      color: var(--text-primary);
+    }
+    .ant-card-actions {
+      background: var(--bg-subtle);
+      border-top-color: var(--border-color);
+    }
+  }
+
+  /* 常用文本色类 */
+  .page-title, .server-name, .proxy-name, .info-value {
+    color: var(--text-primary) !important;
+  }
+  .info-label, .description, .help-text, .empty-guide p {
+    color: var(--text-tertiary) !important;
+  }
+
+  /* 过滤工具栏等浅背景区块 */
+  .filter-toolbar, .status-card, .quick-actions {
+    background: var(--bg-subtle) !important;
+    border-color: var(--border-color) !important;
+  }
+
+  /* descriptions 表格 */
+  .ant-descriptions-item-label {
+    background: var(--bg-subtle) !important;
+    color: var(--text-secondary) !important;
+  }
+  .ant-descriptions-item-content {
+    color: var(--text-primary) !important;
+  }
+
+  /* 表格 */
+  .ant-table {
+    background: transparent;
+    color: var(--text-primary);
+    .ant-table-thead > tr > th {
+      background: var(--bg-subtle);
+      color: var(--text-secondary);
+      border-bottom-color: var(--border-color);
+    }
+    .ant-table-tbody > tr > td {
+      border-bottom-color: var(--border-color);
+    }
+    .ant-table-tbody > tr:hover > td {
+      background: var(--bg-hover);
+    }
+  }
+
+  /* 输入框前缀等 */
+  .ant-input, .ant-input-number, .ant-select-selector {
+    background: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+  }
 }

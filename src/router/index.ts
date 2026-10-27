@@ -1,12 +1,17 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import Layout from '@/components/Layout.vue';
-import Dashboard from '@/views/Dashboard.vue';
-import Servers from '@/views/Servers.vue';
-import Proxies from '@/views/Proxies.vue';
-import Versions from '@/views/Versions.vue';
-import Logs from '@/views/Logs.vue';
-import Settings from '@/views/Settings.vue';
-import About from '@/views/About.vue';
+
+// 路由懒加载：各 view 拆独立 chunk，首屏只加载 Layout + 目标页
+// （历史性能问题：7 个页面全部静态 import，1.6MB JS 全进首屏）
+const Dashboard = () => import('@/views/Dashboard.vue');
+const Servers = () => import('@/views/Servers.vue');
+const Proxies = () => import('@/views/Proxies.vue');
+const Versions = () => import('@/views/Versions.vue');
+const Logs = () => import('@/views/Logs.vue');
+const Settings = () => import('@/views/Settings.vue');
+const About = () => import('@/views/About.vue');
+const Stats = () => import('@/views/Stats.vue');
+const Inspector = () => import('@/views/Inspector.vue');
 
 const routes = [
   {
@@ -38,6 +43,16 @@ const routes = [
         path: 'logs',
         name: 'Logs',
         component: Logs,
+      },
+      {
+        path: 'stats',
+        name: 'Stats',
+        component: Stats,
+      },
+      {
+        path: 'inspector',
+        name: 'Inspector',
+        component: Inspector,
       },
       {
         path: 'settings',

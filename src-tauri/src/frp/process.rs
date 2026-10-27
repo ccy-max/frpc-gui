@@ -102,10 +102,10 @@ impl FrpProcessManager {
         // 启动前清场：杀掉本服务器配置下的孤儿 frpc 进程
         // 历史 bug：应用重启/停止失败残留的孤儿进程与新实例叠加，
         // 旧进程用旧配置持续运行（连错端口、刷旧日志），用户误以为配置不生效
+        // 性能：kill_orphans 内部已轮询确认进程退出，无需额外 sleep
         if self.is_any_orphan_alive() {
             let n = self.kill_orphans();
             warn!("Cleaned {} orphan frpc process(es) before start", n);
-            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
         }
 
         info!("Starting FRP process: {:?}", self.frpc_path);
@@ -263,6 +263,9 @@ impl FrpProcessManager {
     ///
     /// 精准匹配命令行中包含本服务器配置目录路径的 frpc 进程，
     /// 不会误杀其他实例或其他程序的 frpc。
+    ///
+    /// 性能：sysinfo 进程内快照（<50ms），替代旧 PowerShell Get-CimInstance
+    /// 子进程方案（冷启动 1~3s，是启动慢的最大元凶）。
     fn find_orphan_pids_by_config(&self) -> Vec<u32> {
         let dir_marker = self.config_path.parent()
             .map(|p| p.to_string_lossy().to_string())
@@ -270,58 +273,15 @@ impl FrpProcessManager {
         if dir_marker.is_empty() {
             return vec![];
         }
-
-        #[cfg(windows)]
-        {
-            // PowerShell 按命令行过滤（frpc.exe 且命令行含配置目录）
-            let ps_script = format!(
-                "Get-CimInstance Win32_Process -Filter \"Name='frpc.exe'\" | \
-                 Where-Object {{ $_.CommandLine -like '*{}*' }} | \
-                 Select-Object -ExpandProperty ProcessId",
-                dir_marker.replace('\'', "''")
-            );
-            if let Ok(output) = Command::new("powershell")
-                .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
-                .creation_flags(0x08000000)
-                .output()
-            {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                return stdout.lines()
-                    .filter_map(|l| l.trim().parse::<u32>().ok())
-                    .collect();
-            }
-            vec![]
-        }
-
-        #[cfg(unix)]
-        {
-            if let Ok(output) = Command::new("pgrep")
-                .args(["-f", &format!("frpc.*{}", dir_marker)])
-                .output()
-            {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                return stdout.lines()
-                    .filter_map(|l| l.trim().parse::<u32>().ok())
-                    .collect();
-            }
-            vec![]
-        }
-    }
-
-    /// 强杀指定 PID（含进程树）
-    fn kill_pid_tree(pid: u32) {
-        #[cfg(windows)]
-        {
-            let _ = Command::new("taskkill")
-                .args(["/F", "/T", "/PID"])
-                .arg(pid.to_string())
-                .creation_flags(0x08000000)
-                .output();
-        }
-        #[cfg(unix)]
-        {
-            let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).output();
-        }
+        // Windows 路径大小写不敏感；统一小写比对
+        let marker_l = dir_marker.to_lowercase();
+        sys_list_frpc_procs()
+            .into_iter()
+            .filter(|(pid, cmd)| {
+                *pid != std::process::id() && cmd.to_lowercase().contains(&marker_l)
+            })
+            .map(|(pid, _)| pid)
+            .collect()
     }
 
     /// 清理本服务器配置目录下的所有孤儿 frpc 进程
@@ -333,11 +293,16 @@ impl FrpProcessManager {
         let count = pids.len();
         for pid in pids {
             info!("Killing orphan frpc process, PID: {}", pid);
-            Self::kill_pid_tree(pid);
+            sys_kill_pid_tree(pid);
         }
         if count > 0 {
-            // 等待进程退出
-            std::thread::sleep(std::time::Duration::from_millis(300));
+            // 等待进程退出：轮询确认（最多 500ms），替代定长 sleep
+            for _ in 0..10 {
+                if self.find_orphan_pids_by_config().is_empty() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
         }
         count
     }
@@ -355,27 +320,29 @@ impl FrpProcessManager {
 
             #[cfg(windows)]
             {
-                Command::new("taskkill")
-                    .args(["/F", "/T", "/PID"])
-                    .arg(pid.to_string())
-                    .creation_flags(0x08000000)
-                    .output()
-                    .ok();
+                sys_kill_pid_tree(pid);
             }
 
             #[cfg(unix)]
             {
                 Command::new("kill").arg("-TERM").arg(pid.to_string()).output().ok();
-                std::thread::sleep(std::time::Duration::from_millis(500));
+                // 轮询等待优雅退出（最多 500ms），超时才强杀——替代定长 500ms sleep
+                for _ in 0..10 {
+                    if !self.is_process_alive_by_pid(pid) { break; }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
                 if self.is_process_alive_by_pid(pid) {
                     Command::new("kill").arg("-KILL").arg(pid.to_string()).output().ok();
                 }
             }
 
-            // 验证进程确实死亡（此前杀完不验证，失败也假装成功）
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            // 验证进程确实死亡：轮询（最多 300ms），死亡即刻继续
+            for _ in 0..6 {
+                if !self.is_process_alive_by_pid(pid) { break; }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
             if self.is_process_alive_by_pid(pid) {
-                warn!("PID {} still alive after taskkill, forcing orphan cleanup", pid);
+                warn!("PID {} still alive after kill, forcing orphan cleanup", pid);
                 self.kill_orphans();
             }
         } else if self.is_any_orphan_alive() {
@@ -403,41 +370,20 @@ impl FrpProcessManager {
     }
 
     /// 按 PID 检查进程存活（不依赖内存句柄）
+    ///
+    /// sysinfo 进程内快照，替代 tasklist/kill -0 子进程方案。
     fn is_process_alive_by_pid(&self, pid: u32) -> bool {
         if pid == 0 {
             return false;
         }
-
-        #[cfg(windows)]
-        {
-            // tasklist 精确匹配 PID
-            if let Ok(output) = Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {}", pid)])
-                .creation_flags(0x08000000)
-                .output()
-            {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                return stdout.to_lowercase().contains("frpc.exe");
-            }
-            false
-        }
-
-        #[cfg(unix)]
-        {
-            use std::process::Command as StdCommand;
-            StdCommand::new("kill")
-                .arg("-0")
-                .arg(pid.to_string())
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-        }
+        sys_pid_alive(pid)
     }
 
     /// 重启 FRP 进程
     pub async fn restart(&mut self, config: &FrpConfig) -> Result<()> {
         self.stop().await?;
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        // stop 内部已轮询确认进程退出；此处短暂等待端口释放即可
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         self.start(config).await
     }
 
@@ -483,49 +429,13 @@ impl FrpProcessManager {
 
     // ==================== 进程存活检测 ====================
 
-    /// 检查进程是否存活（使用 kill(pid, 0) 方式）
+    /// 检查进程是否存活（sysinfo 进程内快照，轮询高频调用零子进程开销）
     pub fn is_process_alive(&self) -> bool {
         let pid = self.pid.load(Ordering::SeqCst);
         if pid == 0 {
             return false;
         }
-
-        #[cfg(unix)]
-        {
-            // 信号 0 = 检查进程是否存在，不实际发送信号
-            use std::process::Command;
-            let result = Command::new("kill")
-                .arg("-0")
-                .arg(pid.to_string())
-                .output();
-            match result {
-                Ok(output) => output.status.success(),
-                Err(_) => false,
-            }
-        }
-
-        #[cfg(windows)]
-        {
-            // Windows: 用 tasklist CSV 解析，精确比对第二列 PID
-            // （避免 "123" 误匹配 "1234" 这类子串命中）
-            use std::process::Command;
-            let mut cmd = Command::new("tasklist");
-            crate::utils::hide_window(&mut cmd);
-            let output = cmd
-                .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
-                .output();
-            match output {
-                Ok(o) => {
-                    let stdout = String::from_utf8_lossy(&o.stdout);
-                    stdout.lines().any(|line| {
-                        // CSV 形如: "frpc.exe","1234","..."; 第二列是 PID
-                        let parts: Vec<&str> = line.split(',').collect();
-                        parts.get(1).map(|p| p.trim_matches('"')) == Some(&pid.to_string())
-                    })
-                }
-                Err(_) => false,
-            }
-        }
+        sys_pid_alive(pid)
     }
 
     /// 探测外部 frpc 进程（应用重启后恢复状态）
@@ -588,6 +498,74 @@ impl FrpProcessManager {
 
 // ==================== 独立函数 ====================
 
+/// frpc 版本缓存：路径 → (是否支持TOML, 版本号字符串)
+///
+/// 历史性能问题：每次 start/reload 都 spawn `frpc -v` 子进程（Windows 上 300ms~1s）。
+/// frpc 二进制内容不变则版本不变，进程内缓存一次即可；
+/// 切换激活版本会换路径 → 天然缓存失效；覆盖导入同路径版本由 set_active_version 调
+/// invalidate_version_cache 显式清理。
+static FRPC_TOML_CACHE: once_cell::sync::Lazy<Mutex<std::collections::HashMap<PathBuf, bool>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// 清除 frpc 版本缓存（版本切换/覆盖导入时调用）
+pub fn invalidate_version_cache() {
+    if let Ok(mut m) = FRPC_TOML_CACHE.lock() {
+        m.clear();
+        info!("frpc version cache invalidated");
+    }
+}
+
+// ==================== 进程内枚举（sysinfo，替代 PowerShell/tasklist 子进程） ====================
+
+/// 按 PID 检查进程存活（进程内读系统快照，毫秒级，无子进程开销）
+pub fn sys_pid_alive(pid: u32) -> bool {
+    use sysinfo::{Pid, System};
+    let mut sys = System::new();
+    sys.refresh_processes();
+    sys.process(Pid::from_u32(pid)).is_some()
+}
+
+/// 枚举所有 frpc 进程：返回 (pid, 命令行) 列表
+///
+/// 用于孤儿检测——替代 PowerShell Get-CimInstance（冷启动 1~3s）。
+pub fn sys_list_frpc_procs() -> Vec<(u32, String)> {
+    use sysinfo::System;
+    let mut sys = System::new();
+    sys.refresh_processes();
+    let mut out = Vec::new();
+    for (pid, proc_) in sys.processes() {
+        let name = proc_.name().to_lowercase();
+        if name == "frpc.exe" || name == "frpc" {
+            let cmd = proc_.cmd().join(" ");
+            out.push((pid.as_u32(), cmd));
+        }
+    }
+    out
+}
+
+/// 强杀指定 PID（含进程树）——sysinfo 版本，无子进程
+///
+/// 0.30 API 无 children()：先快照全部进程，收集 parent==pid 的子进程，
+/// 先杀子再杀父。
+pub fn sys_kill_pid_tree(pid: u32) {
+    use sysinfo::{Pid, System};
+    let mut sys = System::new();
+    sys.refresh_processes();
+    let target = Pid::from_u32(pid);
+    let children: Vec<Pid> = sys.processes().iter()
+        .filter(|(_, p)| p.parent().map(|pp| pp == target).unwrap_or(false))
+        .map(|(cpid, _)| *cpid)
+        .collect();
+    for c in children {
+        if let Some(cp) = sys.process(c) {
+            cp.kill();
+        }
+    }
+    if let Some(p) = sys.process(target) {
+        p.kill();
+    }
+}
+
 /// 检查 FRP 二进制文件是否存在
 pub fn check_frpc_exists(path: &Path) -> bool {
     path.exists() && path.is_file()
@@ -614,21 +592,31 @@ impl FrpProcessManager {
     ///
     /// 版本获取失败时保守返回 true（假定新版，走 TOML）。
     pub fn frpc_supports_toml(frpc_path: &Path) -> bool {
-        match get_frpc_version(frpc_path) {
+        // 缓存命中直接返回，避免重复 spawn `frpc -v`
+        if let Ok(m) = FRPC_TOML_CACHE.lock() {
+            if let Some(&v) = m.get(frpc_path) {
+                return v;
+            }
+        }
+        let supports = match get_frpc_version(frpc_path) {
             Ok(ver) => {
                 let v = ver.trim().trim_start_matches('v');
                 let parts: Vec<u32> = v.split('.')
                     .map(|s| s.trim().parse::<u32>().unwrap_or(0))
                     .collect();
-                let supports = parts.first().copied().unwrap_or(0) > 0
+                let s = parts.first().copied().unwrap_or(0) > 0
                     || parts.get(1).copied().unwrap_or(0) >= 52;
-                info!("frpc version {}: toml_support={}", ver, supports);
-                supports
+                info!("frpc version {}: toml_support={} (cached)", ver, s);
+                s
             }
             Err(e) => {
                 warn!("获取 frpc 版本失败({})，假定支持 TOML", e);
                 true
             }
+        };
+        if let Ok(mut m) = FRPC_TOML_CACHE.lock() {
+            m.insert(frpc_path.to_path_buf(), supports);
         }
+        supports
     }
 }

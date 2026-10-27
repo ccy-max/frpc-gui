@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
 import { useAppStore } from '@/stores/app';
 import { StarOutlined } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
 import packageJson from '../../package.json';
 
+const { t } = useI18n();
 const appStore = useAppStore();
 
 const packageInfo = {
@@ -32,20 +34,20 @@ async function checkUpdate() {
     <a-card class="about-card">
       <div class="logo-section">
         <h1 class="app-name">FRPC GUI</h1>
-        <p class="description">FRP 内网穿透桌面管理应用</p>
+        <p class="description">{{ t('about.description') }}</p>
       </div>
       <a-descriptions :column="1" bordered>
-        <a-descriptions-item label="版本">
+        <a-descriptions-item :label="t('about.version')">
           <a-tag color="blue">{{ packageInfo.version }}</a-tag>
         </a-descriptions-item>
-        <a-descriptions-item label="作者">{{ packageInfo.author }}</a-descriptions-item>
-        <a-descriptions-item label="许可证">{{ packageInfo.license }}</a-descriptions-item>
+        <a-descriptions-item :label="t('about.author')">{{ packageInfo.author }}</a-descriptions-item>
+        <a-descriptions-item :label="t('about.license')">{{ packageInfo.license }}</a-descriptions-item>
       </a-descriptions>
       <div class="links">
         <a-space>
           <a-button type="primary" @click="openUrl(packageInfo.github)">
             <template #icon><StarOutlined /></template>
-            GitHub 仓库
+            {{ t('about.github') }}
           </a-button>
           <a-button @click="checkUpdate">检查更新</a-button>
         </a-space>

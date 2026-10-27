@@ -178,6 +178,14 @@ onMounted(() => {
   // 代理请求信息由全局 5s 轮询自动刷新，无需额外订阅
 });
 
+// D6：首次上手引导（无任何服务器时显示三步卡片）
+const showOnboarding = computed(() => appStore.servers.length === 0);
+const onboardingDismissed = ref(localStorage.getItem('onboardingDismissed') === '1');
+function dismissOnboarding() {
+  onboardingDismissed.value = true;
+  localStorage.setItem('onboardingDismissed', '1');
+}
+
 onUnmounted(() => {
   if (uptimeTimer) clearInterval(uptimeTimer);
 });
@@ -185,7 +193,45 @@ onUnmounted(() => {
 
 <template>
   <div class="dashboard-container">
+    <!-- D3：首屏骨架屏（本地数据加载完成前）-->
+    <a-skeleton v-if="!appStore.dataReady" active :paragraph="{ rows: 6 }" style="padding: 24px 0" />
+    <template v-else>
     <h1 class="page-title">概览</h1>
+
+    <!-- D6：三步上手引导（无服务器时显示，可关闭）-->
+    <a-card v-if="showOnboarding && !onboardingDismissed" class="onboarding-card" :bordered="false">
+      <template #title>👋 欢迎使用 FRPC GUI —— 3 步开始内网穿透</template>
+      <template #extra><a @click="dismissOnboarding">不再显示</a></template>
+      <a-row :gutter="16">
+        <a-col :xs="24" :md="8">
+          <div class="onboard-step" @click="router.push('/servers')">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <div class="step-title">添加服务器</div>
+              <div class="step-desc">填写 frps 服务端地址、端口和令牌</div>
+            </div>
+          </div>
+        </a-col>
+        <a-col :xs="24" :md="8">
+          <div class="onboard-step" @click="router.push('/proxies')">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <div class="step-title">创建代理</div>
+              <div class="step-desc">把本地端口/服务映射到公网</div>
+            </div>
+          </div>
+        </a-col>
+        <a-col :xs="24" :md="8">
+          <div class="onboard-step" @click="startFrp">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <div class="step-title">启动 FRP</div>
+              <div class="step-desc">一键连接，实时查看流量与状态</div>
+            </div>
+          </div>
+        </a-col>
+      </a-row>
+    </a-card>
 
     <!-- 统计卡片 -->
     <div class="stats-grid">
@@ -256,12 +302,29 @@ onUnmounted(() => {
         <span class="traffic-item"><ArrowUpOutlined /> {{ formatBytes(totalTraffic.out) }}</span>
       </div>
     </a-card>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .dashboard-container { padding: 4px 8px; }
 .page-title { font-size: 22px; font-weight: 600; margin-bottom: 16px; }
+
+/* D6 上手引导 */
+.onboarding-card { margin-bottom: 16px; border-radius: 12px; background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%); }
+.onboard-step {
+  display: flex; align-items: center; gap: 14px; padding: 16px;
+  border-radius: 10px; cursor: pointer; transition: all 0.2s ease; height: 100%;
+}
+.onboard-step:hover { background: rgba(37, 99, 235, 0.08); transform: translateY(-2px); }
+.step-num {
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb, #7c3aed); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px;
+}
+.step-title { font-weight: 600; color: #1e293b; margin-bottom: 2px; }
+.step-desc { font-size: 13px; color: #64748b; }
+
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px; }
 .stat-card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
 .stat-title { font-size: 13px; color: #8c8c8c; margin-bottom: 10px; }

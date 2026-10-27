@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod download;
+pub mod inspector;
 pub mod process;
 
 pub use config::{ConfigManager, FrpConfig};

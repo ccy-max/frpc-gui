@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useAppStore } from '@/stores/app';
 import { FolderOpenOutlined, ExportOutlined, ImportOutlined, CopyOutlined, SnippetsOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager';
 
+const { t } = useI18n();
 const appStore = useAppStore();
 const activeTab = ref('general');
 
@@ -141,6 +143,9 @@ async function handleParseBase64() {
 }
 
 async function handleConfigChange() {
+  // 主题/语言即时生效（此前只保存不应用，需重启才看到变化）
+  appStore.applyTheme(appStore.theme);
+  await appStore.setLanguage(appStore.language);
   await appStore.saveSettings();
   message.success('设置已保存');
 }
@@ -174,24 +179,24 @@ async function pickFile(field: string, ext: string[]) {
 
 <template>
   <div class="page-container">
-    <a-page-header title="设置" />
+    <a-page-header :title="t('settings.title')" />
 
     <a-card :bordered="false">
       <a-tabs v-model:activeKey="activeTab">
         <!-- 通用 -->
-        <a-tab-pane key="general" tab="通用">
+        <a-tab-pane key="general" :tab="t('settings.general')">
           <a-form layout="vertical" :wrapper-col="{ span: 12 }">
-            <a-form-item label="语言">
+            <a-form-item :label="t('settings.language')">
               <a-select v-model:value="appStore.language" @change="handleConfigChange" style="width: 200px">
                 <a-select-option value="zh-CN">简体中文</a-select-option>
                 <a-select-option value="en-US">English</a-select-option>
               </a-select>
             </a-form-item>
-            <a-form-item label="主题">
+            <a-form-item :label="t('settings.theme')">
               <a-select v-model:value="appStore.theme" @change="handleConfigChange" style="width: 200px">
-                <a-select-option value="light">浅色</a-select-option>
-                <a-select-option value="dark">深色</a-select-option>
-                <a-select-option value="auto">跟随系统</a-select-option>
+                <a-select-option value="light">{{ t('settings.light') }}</a-select-option>
+                <a-select-option value="dark">{{ t('settings.dark') }}</a-select-option>
+                <a-select-option value="auto">{{ t('settings.auto') }}</a-select-option>
               </a-select>
             </a-form-item>
             <a-form-item label="默认服务器">
@@ -218,6 +223,14 @@ async function pickFile(field: string, ext: string[]) {
                 <a-checkbox v-model:checked="appStore.minimizeToTray" @change="handleConfigChange">最小化到托盘</a-checkbox>
                 <a-checkbox v-model:checked="appStore.closeToTray" @change="handleConfigChange">关闭到托盘</a-checkbox>
               </a-space>
+            </a-form-item>
+            <a-form-item label="桌面通知">
+              <a-space direction="vertical">
+                <a-checkbox v-model:checked="appStore.notifyOffline" @change="handleConfigChange">代理掉线时通知</a-checkbox>
+                <a-checkbox v-model:checked="appStore.notifyOnline" @change="handleConfigChange">代理恢复时通知</a-checkbox>
+                <a-checkbox v-model:checked="appStore.notifyStartFailed" @change="handleConfigChange">启动失败时通知</a-checkbox>
+              </a-space>
+              <div class="form-help">FRPC GUI 在后台运行时的关键事件将通过系统通知提醒</div>
             </a-form-item>
           </a-form>
         </a-tab-pane>

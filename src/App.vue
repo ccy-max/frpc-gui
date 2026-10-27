@@ -1,11 +1,25 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted } from 'vue';
+import { theme as antdThemeApi } from 'ant-design-vue';
+import zhCN from 'ant-design-vue/es/locale/zh_CN';
+import enUS from 'ant-design-vue/es/locale/en_US';
 import { useAppStore } from '@/stores/app';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { confirm } from '@tauri-apps/plugin-dialog';
 
 const appStore = useAppStore();
+
+// antd 主题联动（A1）：dark class 只影响自绘样式，
+// ConfigProvider 才让 Modal/Dropdown/message/DatePicker 等全部组件跟随
+const antdTheme = computed(() => ({
+  algorithm: appStore.isDarkMode ? antdThemeApi.darkAlgorithm : antdThemeApi.defaultAlgorithm,
+  token: {
+    colorPrimary: '#2563eb',
+    borderRadius: 8,
+  },
+}));
+const antdLocale = computed(() => (appStore.language === 'en-US' ? enUS : zhCN));
 
 // 拦截右键菜单和刷新快捷键（防止 WebView 重新加载导致内存状态全部丢失）
 // 生产环境禁用；开发环境保留右键方便调试
@@ -79,7 +93,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <router-view />
+  <a-config-provider :theme="antdTheme" :locale="antdLocale">
+    <router-view v-slot="{ Component }">
+      <transition name="page" mode="out-in">
+        <component :is="Component" />
+      </transition>
+    </router-view>
+  </a-config-provider>
 </template>
 
 <style>
@@ -89,5 +109,15 @@ html, body, #app {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+/* 路由切换过渡（C3）：fade + 轻微上移，尊重 reduced-motion */
+.page-enter-active, .page-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.page-enter-from { opacity: 0; transform: translateY(8px); }
+.page-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active, .page-leave-active { transition: none; }
 }
 </style>

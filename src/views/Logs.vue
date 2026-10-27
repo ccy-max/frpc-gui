@@ -3,12 +3,29 @@ import { computed, ref } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { ReloadOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
+import VirtualLogList from '@/components/VirtualLogList.vue';
 
 const appStore = useAppStore();
 
 const searchKeyword = ref('');
 const logLevelFilter = ref<string>('all');
 const autoScroll = ref(true);
+const vlogRef = ref<InstanceType<typeof VirtualLogList>>();
+
+// FRP 磁盘日志行（过滤空行）
+const frpcLogLines = computed(() =>
+  (appStore.frpcLogContent || '').split('\n').filter(l => l.trim()),
+);
+
+// 复制单行日志
+async function copyLine(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    message.success('已复制');
+  } catch {
+    message.error('复制失败');
+  }
+}
 
 const logLevels = [
   { value: 'all', label: '全部', color: '' },
@@ -95,27 +112,45 @@ function getLevelColor(level: string) {
       <a-checkbox v-model:checked="autoScroll">自动滚动</a-checkbox>
     </div>
 
-    <!-- 日志列表 -->
+    <!-- 日志列表（A3：虚拟滚动，1000+ 行不卡） -->
     <a-card class="log-card">
-      <div class="log-console" v-if="filteredLogs.length > 0">
-        <div v-for="(log, index) in filteredLogs" :key="index" class="log-line">
-          <span class="log-time">{{ new Date(log.timestamp).toLocaleString() }}</span>
-          <a-tag :color="getLevelColor(log.level)" size="small" class="log-level">
-            {{ log.level.toUpperCase() }}
-          </a-tag>
-          <span class="log-msg">{{ log.message }}</span>
-        </div>
-      </div>
+      <template v-if="filteredLogs.length > 0">
+        <VirtualLogList
+          ref="vlogRef"
+          :items="filteredLogs"
+          :item-height="32"
+          :height="500"
+        >
+          <template #item="{ item: log }">
+            <div class="log-line" :title="log.message">
+              <span class="log-time">{{ new Date(log.timestamp).toLocaleString() }}</span>
+              <a-tag :color="getLevelColor(log.level)" size="small" class="log-level">
+                {{ log.level.toUpperCase() }}
+              </a-tag>
+              <span class="log-msg">{{ log.message }}</span>
+              <a-tooltip title="复制此行">
+                <span class="log-copy" @click="copyLine(log.message)">⧉</span>
+              </a-tooltip>
+            </div>
+          </template>
+        </VirtualLogList>
+        <div class="log-count-bar">共 {{ filteredLogs.length }} 条</div>
+      </template>
       <a-empty v-else description="暂无日志" />
     </a-card>
 
-    <!-- FRP 磁盘日志 -->
-    <a-card v-if="appStore.frpcLogContent" title="FRP 磁盘日志" style="margin-top: 16px">
-      <div class="log-console">
-        <div v-for="(line, i) in appStore.frpcLogContent.split('\n').filter(l => l.trim())" :key="i" class="log-line">
-          <span class="log-msg">{{ line }}</span>
-        </div>
-      </div>
+    <!-- FRP 磁盘日志（同样虚拟化） -->
+    <a-card v-if="frpcLogLines.length" title="FRP 磁盘日志" style="margin-top: 16px">
+      <VirtualLogList :items="frpcLogLines" :item-height="30" :height="360">
+        <template #item="{ item: line }">
+          <div class="log-line" :title="line">
+            <span class="log-msg">{{ line }}</span>
+            <a-tooltip title="复制此行">
+              <span class="log-copy" @click="copyLine(line)">⧉</span>
+            </a-tooltip>
+          </div>
+        </template>
+      </VirtualLogList>
     </a-card>
   </div>
 </template>
@@ -224,16 +259,48 @@ function getLevelColor(level: string) {
   }
 }
 
-.log-line {
-  padding: 6px 0;
-  border-bottom: 1px solid #334155;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
+// 虚拟列表容器（深色控制台风格）
+:deep(.vlog-container) {
+  background-color: #1e293b;
+  color: #e2e8f0;
+  padding: 8px 16px;
+  border-radius: 12px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
 
-  &:last-child {
-    border-bottom: none;
+  &::-webkit-scrollbar {
+    width: 8px;
   }
+
+  &::-webkit-scrollbar-track {
+    background: #0f172a;
+    border-radius: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 4px;
+
+    &:hover {
+      background: #64748b;
+    }
+  }
+}
+
+.log-count-bar {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: right;
+}
+
+.log-line {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #334155;
+  overflow: hidden;
 }
 
 .log-time {
@@ -247,12 +314,32 @@ function getLevelColor(level: string) {
   text-align: center;
   border-radius: 4px;
   font-weight: 500;
+  flex-shrink: 0;
 }
 
 .log-msg {
   color: #e2e8f0;
   flex: 1;
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   line-height: 1.5;
+}
+
+.log-copy {
+  flex-shrink: 0;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+
+  &:hover {
+    color: #e2e8f0;
+  }
+}
+
+.log-line:hover .log-copy {
+  opacity: 1;
 }
 </style>

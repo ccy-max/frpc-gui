@@ -292,7 +292,12 @@ pub async fn get_logs(_state: State<'_, AppState>) -> Result<Vec<String>, String
 pub async fn set_active_version(version: String, state: State<'_, AppState>) -> Result<bool, String> {
     let vm = state.version_manager.lock().await;
     match vm.as_ref() {
-        Some(m) => { m.set_active_version(&version).map_err(|e| e.to_string())?; Ok(true) }
+        Some(m) => {
+            m.set_active_version(&version).map_err(|e| e.to_string())?;
+            // 版本切换 → frpc 二进制可能变化，失效版本缓存（B1）
+            crate::frp::process::invalidate_version_cache();
+            Ok(true)
+        }
         None => Err("版本管理器未初始化".to_string()),
     }
 }
@@ -355,6 +360,8 @@ pub async fn import_local_frpc(file_path: String, state: State<'_, AppState>) ->
     match vm.as_ref() {
         Some(m) => {
             let path = m.import_local_frpc(&PathBuf::from(&file_path)).map_err(|e| e.to_string())?;
+            // 导入可能覆盖同路径二进制 → 失效版本缓存（B1）
+            crate::frp::process::invalidate_version_cache();
             Ok(path.to_string_lossy().to_string())
         }
         None => Err("版本管理器未初始化".to_string()),
@@ -1757,6 +1764,66 @@ pub async fn open_devtools(app: tauri::AppHandle) -> Result<(), String> {
     } else {
         Err("找不到主窗口".to_string())
     }
+}
+
+/// 发送桌面通知（N1）
+///
+/// 插件已安装但此前前端零调用——代理掉线/恢复/启动失败无感知。
+/// 由前端在状态迁移点调用，设置页开关控制是否发送。
+#[tauri::command]
+pub async fn send_notification(
+    app: tauri::AppHandle,
+    title: String,
+    body: String,
+) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| format!("发送通知失败: {}", e))
+}
+
+// ==================== N7 HTTP 请求检查器 ====================
+
+/// 启动检查器：在 127.0.0.1:port 反代到 upstream（如 127.0.0.1:8080）
+#[tauri::command]
+pub async fn inspector_start(port: u16, upstream: String) -> Result<(), String> {
+    crate::frp::inspector::start(port, upstream).await
+}
+
+/// 停止检查器
+#[tauri::command]
+pub async fn inspector_stop() -> Result<(), String> {
+    crate::frp::inspector::stop().await
+}
+
+/// 检查器状态：(running, port, upstream)
+#[tauri::command]
+pub async fn inspector_status() -> Result<(bool, Option<u16>, Option<String>), String> {
+    crate::frp::inspector::status().await
+}
+
+/// 拉取捕获的请求列表（前端轮询）
+#[tauri::command]
+pub async fn inspector_list() -> Result<Vec<serde_json::Value>, String> {
+    let reqs = crate::frp::inspector::list_requests().await?;
+    reqs.iter()
+        .map(|r| serde_json::to_value(r).map_err(|e| e.to_string()))
+        .collect()
+}
+
+/// 清空捕获
+#[tauri::command]
+pub async fn inspector_clear() -> Result<(), String> {
+    crate::frp::inspector::clear_requests().await
+}
+
+/// 重放指定请求
+#[tauri::command]
+pub async fn inspector_replay(id: u64) -> Result<u64, String> {
+    crate::frp::inspector::replay(id).await
 }
 
 #[cfg(test)]

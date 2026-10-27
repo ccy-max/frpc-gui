@@ -1,17 +1,51 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAppStore } from '@/stores/app';
-import { PlusOutlined, DesktopOutlined, CheckCircleOutlined, PlayCircleOutlined, PauseCircleOutlined, ReloadOutlined } from '@ant-design/icons-vue';
-import { message, Modal } from 'ant-design-vue';
+import { PlusOutlined, CloudServerOutlined, CheckCircleOutlined, PlayCircleOutlined, PauseCircleOutlined, ReloadOutlined, LoadingOutlined, CopyOutlined } from '@ant-design/icons-vue';
+import { message } from 'ant-design-vue';
+import type { FormInstance, Rule } from 'ant-design-vue/es/form';
 
 const appStore = useAppStore();
 
-const searchKeyword = ref('');
+const searchKeyword = ref(localStorage.getItem('serverSearch') || '');
+watch(searchKeyword, v => localStorage.setItem('serverSearch', v));
 const modalVisible = ref(false);
 const editingId = ref<string | null>(null);
+const formRef = ref<FormInstance>();
+const saving = ref(false);
 const form = ref<any>({
   id: '', name: '', serverAddr: '', serverPort: 7000, token: '', tlsEnable: false, enabled: true,
+  user: '', metaToken: '',
 });
+
+// A2 表单校验：字段级 rules，错误定位到具体输入框
+const serverRules: Record<string, Rule[]> = {
+  name: [
+    { required: true, message: '请输入服务器名称', trigger: 'blur' },
+    {
+      validator: async (_r: Rule, value: string) => {
+        const dup = appStore.servers.some(s => s.name === value && s.id !== editingId.value);
+        if (dup) throw new Error('该名称已存在');
+      },
+      trigger: 'blur',
+    },
+  ],
+  serverAddr: [
+    { required: true, message: '请输入服务器地址', trigger: 'blur' },
+    {
+      validator: async (_r: Rule, value: string) => {
+        if (!value) return;
+        const ipOk = /^(\d{1,3}\.){3}\d{1,3}$/.test(value);
+        const domainOk = /^[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}$/.test(value);
+        if (!ipOk && !domainOk) throw new Error('请输入合法的 IPv4 地址或域名');
+      },
+      trigger: 'blur',
+    },
+  ],
+  serverPort: [
+    { required: true, type: 'number', min: 1, max: 65535, message: '端口范围 1-65535', trigger: 'blur' },
+  ],
+};
 
 const filteredServers = computed(() => {
   if (!searchKeyword.value.trim()) return appStore.servers;
@@ -75,60 +109,80 @@ function openAdd() {
   editingId.value = null;
   form.value = { id: Date.now().toString(), name: '', serverAddr: '', serverPort: 7000, token: '', tlsEnable: false, enabled: true };
   modalVisible.value = true;
+  formRef.value?.clearValidate();
 }
+
+// B1x：命令面板"新建服务器"入口
+function onOpenAddServer() { openAdd(); }
+onMounted(() => window.addEventListener('open-add-server', onOpenAddServer));
+onUnmounted(() => window.removeEventListener('open-add-server', onOpenAddServer));
 
 function openEdit(server: any) {
   editingId.value = server.id;
   form.value = { ...server };
   modalVisible.value = true;
+  formRef.value?.clearValidate();
 }
 
 function handleSave() {
-  if (!form.value.name || !form.value.serverAddr) {
-    message.warning('请填写必填项');
-    return;
+  // A2：走 a-form rules 校验，错误定位到字段
+  formRef.value?.validate().then(() => {
+    if (editingId.value) {
+      appStore.updateServer(editingId.value, form.value);
+      message.success('保存成功');
+    } else {
+      appStore.addServer(form.value);
+      message.success('添加成功');
+    }
+    modalVisible.value = false;
+  }).catch(() => {
+    // 校验失败：字段已内联标红，无需额外提示
+  });
+}
+
+// B4x：复制服务器地址
+async function copyAddr(server: any) {
+  try {
+    await navigator.clipboard.writeText(`${server.serverAddr}:${server.serverPort}`);
+    message.success('地址已复制');
+  } catch {
+    message.error('复制失败');
   }
-  if (editingId.value) {
-    appStore.updateServer(editingId.value, form.value);
-    message.success('保存成功');
-  } else {
-    appStore.addServer(form.value);
-    message.success('添加成功');
-  }
-  modalVisible.value = false;
+}
+
+// F3：pending 操作显示文案
+function opLabel(op: string): string {
+  return op === 'starting' ? '启动中…' : op === 'stopping' ? '停止中…' : '重启中…';
+}
+
+// B3x：删除确认文案带对象名 + 关联影响
+function deleteConfirmText(server: any): string {
+  const n = getProxyCount(server.id);
+  return n > 0
+    ? `删除服务器「${server.name}」后，其下 ${n} 个代理将失去关联。`
+    : `确定删除服务器「${server.name}」？`;
 }
 
 async function handleDelete(server: any) {
   // 检查是否有关联的代理
   const relatedProxies = appStore.proxies.filter(p => p.server_id === server.id);
-  
-  Modal.confirm({
-    title: '确认删除',
-    content: relatedProxies.length > 0 
-      ? `该服务器下有关联的 ${relatedProxies.length} 个代理，删除后这些代理将失去关联。确定要继续吗？`
-      : `确定要删除服务器 "${server.name}" 吗？`,
-    okText: '确认删除',
-    okType: 'danger',
-    cancelText: '取消',
-    onOk: async () => {
-      // 如果有关联的代理，清空它们的 server_id
-      if (relatedProxies.length > 0) {
-        for (const proxy of relatedProxies) {
-          await appStore.updateProxy(proxy.name, { server_id: null });
-        }
-        message.info(`已清空 ${relatedProxies.length} 个代理的服务器关联`);
-      }
-      
-      // 如果删除的是默认服务器，清空默认设置
-      if (appStore.defaultServerId === server.id) {
-        appStore.setDefaultServerId(null);
-        message.warning('默认服务器已删除，默认设置已清空');
-      }
-      
-      await appStore.deleteServer(server.id);
-      message.success('删除成功');
-    },
-  });
+
+  // 如果有关联的代理，清空它们的 server_id
+  if (relatedProxies.length > 0) {
+    for (const proxy of relatedProxies) {
+      await appStore.updateProxy(proxy.name, { server_id: null });
+    }
+    message.info(`已清空 ${relatedProxies.length} 个代理的服务器关联`);
+  }
+
+  // 如果删除的是默认服务器，清空默认设置
+  if (appStore.defaultServerId === server.id) {
+    appStore.setDefaultServerId(null);
+    message.warning('默认服务器已删除，默认设置已清空');
+  }
+
+  await appStore.deleteServer(server.id);
+  message.success(`服务器「${server.name}」已删除`);
 }
 
 async function setActiveServer(server: any) {
@@ -148,7 +202,7 @@ async function setActiveServer(server: any) {
   <div class="page-container">
     <div class="page-header">
       <h1 class="page-title">
-        <ServerOutlined class="header-icon" />
+        <CloudServerOutlined class="header-icon" />
         服务器管理
       </h1>
       <a-button type="primary" @click="openAdd">
@@ -215,6 +269,7 @@ async function setActiveServer(server: any) {
           <div class="server-info-row">
             <span class="info-label">地址：</span>
             <span class="info-value">{{ server.serverAddr }}</span>
+            <CopyOutlined class="copy-icon" @click="copyAddr(server)" />
           </div>
           <div class="server-info-row">
             <span class="info-label">端口：</span>
@@ -245,8 +300,13 @@ async function setActiveServer(server: any) {
         </div>
 
         <template #actions>
-          <!-- 进程控制按钮 -->
-          <template v-if="getServerStatus(server.id)?.running">
+          <!-- 进程控制按钮（F3：pending 时 loading + 禁用防连点） -->
+          <template v-if="appStore.pendingOps.get(server.id)">
+            <a style="color: #94a3b8; cursor: not-allowed;">
+              <LoadingOutlined spin /> {{ opLabel(appStore.pendingOps.get(server.id)!) }}
+            </a>
+          </template>
+          <template v-else-if="getServerStatus(server.id)?.running">
             <a @click="stopServer(server)" style="color: #ef4444;">
               <PauseCircleOutlined /> 停止
             </a>
@@ -265,7 +325,12 @@ async function setActiveServer(server: any) {
           <!-- 常规操作 -->
           <a @click="openEdit(server)">编辑</a>
           <a @click="setActiveServer(server)" v-if="!server.active">设为活动</a>
-          <a-popconfirm title="确定删除？" @confirm="handleDelete(server)">
+          <a-popconfirm
+            :title="deleteConfirmText(server)"
+            :ok-text="`删除「${server.name}」`"
+            ok-type="danger"
+            @confirm="handleDelete(server)"
+          >
             <a class="text-danger">删除</a>
           </a-popconfirm>
         </template>
@@ -278,18 +343,25 @@ async function setActiveServer(server: any) {
       @ok="handleSave"
       width="600px"
     >
-      <a-form :model="form" layout="vertical">
-        <a-form-item label="名称" required>
+      <a-form ref="formRef" :model="form" :rules="serverRules" layout="vertical">
+        <a-form-item label="名称" name="name">
           <a-input v-model:value="form.name" placeholder="请输入服务器名称" />
         </a-form-item>
-        <a-form-item label="服务器地址" required>
-          <a-input v-model:value="form.serverAddr" placeholder="例如：127.0.0.1" />
+        <a-form-item label="服务器地址" name="serverAddr">
+          <a-input v-model:value="form.serverAddr" placeholder="例如：127.0.0.1 或 frp.example.com" />
         </a-form-item>
-        <a-form-item label="端口" required>
+        <a-form-item label="端口" name="serverPort">
           <a-input-number v-model:value="form.serverPort" :min="1" :max="65535" style="width: 100%" />
         </a-form-item>
         <a-form-item label="令牌">
           <a-input-password v-model:value="form.token" placeholder="请输入令牌" />
+        </a-form-item>
+        <a-form-item label="用户名（multiuser 插件）">
+          <a-input v-model:value="form.user" placeholder="可选：frps 启用 multiuser 插件时填写" />
+        </a-form-item>
+        <a-form-item label="meta_token（multiuser 插件）">
+          <a-input-password v-model:value="form.metaToken" placeholder="可选：与 user 配套使用" />
+          <div class="form-help">frps 端启用 multiuser 插件时，user + meta_token 用于多用户鉴权</div>
         </a-form-item>
         <a-form-item label="启用 TLS">
           <a-switch v-model:checked="form.tlsEnable" />
@@ -412,6 +484,14 @@ async function setActiveServer(server: any) {
         font-family: 'Courier New', monospace;
       }
     }
+  }
+
+  .copy-icon {
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 13px;
+    transition: color 0.2s;
+    &:hover { color: #2563eb; }
   }
 
   :deep(.ant-card-actions) {

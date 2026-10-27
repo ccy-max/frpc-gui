@@ -14,7 +14,7 @@ use std::fs;
 use std::path::PathBuf;
 
 /// 当前设置数据版本
-const SETTINGS_VERSION: u32 = 2;
+const SETTINGS_VERSION: u32 = 3;
 
 /// 应用设置（持久化到 JSON 文件）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +29,19 @@ pub struct AppSettings {
     pub close_to_tray: bool,
     #[serde(default)]
     pub default_server_id: Option<String>, // 默认服务器 ID
+    /// 桌面通知：代理掉线（v3 新增，默认开）
+    #[serde(default = "default_true")]
+    pub notify_offline: bool,
+    /// 桌面通知：代理恢复上线（v3 新增，默认开）
+    #[serde(default = "default_true")]
+    pub notify_online: bool,
+    /// 桌面通知：启动失败（v3 新增，默认开）
+    #[serde(default = "default_true")]
+    pub notify_start_failed: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_version() -> u32 {
@@ -45,6 +58,9 @@ impl Default for AppSettings {
             minimize_to_tray: true,
             close_to_tray: true,
             default_server_id: None,
+            notify_offline: true,
+            notify_online: true,
+            notify_start_failed: true,
         }
     }
 }

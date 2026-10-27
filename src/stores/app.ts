@@ -3,6 +3,8 @@ import { ref, computed, watch } from 'vue';
 import type { FrpConfig, ProcessStatus, LogEntry, LocalPort } from '@/types';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { message } from 'ant-design-vue';
+import { setLocale } from '@/i18n';
 
 export const useAppStore = defineStore('app', () => {
   // 应用设置（持久化）
@@ -12,6 +14,22 @@ export const useAppStore = defineStore('app', () => {
   const minimizeToTray = ref(true);
   const closeToTray = ref(true);
   const defaultServerId = ref<string | null>(null);  // 默认服务器 ID
+
+  // 桌面通知开关（N1，持久化到 settings.json）
+  const notifyOffline = ref(true);
+  const notifyOnline = ref(true);
+  const notifyStartFailed = ref(true);
+
+  // 启停操作进行中状态（F3 乐观反馈）：serverId → 'starting' | 'stopping' | 'restarting'
+  // 按钮点击即刻置位 → UI 立刻显示 loading 并禁用防连点，操作完成后清除
+  const pendingOps = ref<Map<string, string>>(new Map());
+
+  function setPending(serverId: string, op: string | null) {
+    const next = new Map(pendingOps.value);
+    if (op) next.set(serverId, op);
+    else next.delete(serverId);
+    pendingOps.value = next;
+  }
 
   // FRP 配置
   const frpConfig = ref<FrpConfig | null>(null);
@@ -31,6 +49,8 @@ export const useAppStore = defineStore('app', () => {
   // 服务器和代理列表
   const servers = ref<any[]>([]);
   const proxies = ref<any[]>([]);
+  // D3：首屏数据就绪标记（Dashboard 骨架屏用）
+  const dataReady = ref(false);
   const versions = ref<any[]>([]);
   const downloadedVersions = ref<any[]>([]);
   const localPorts = ref<any[]>([]);
@@ -127,7 +147,11 @@ export const useAppStore = defineStore('app', () => {
       minimizeToTray.value = s.minimize_to_tray ?? true;
       closeToTray.value = s.close_to_tray ?? true;
       defaultServerId.value = s.default_server_id || null;
+      notifyOffline.value = s.notify_offline ?? true;
+      notifyOnline.value = s.notify_online ?? true;
+      notifyStartFailed.value = s.notify_start_failed ?? true;
       applyTheme(theme.value);
+      setLocale(language.value);
     } catch (e) {
       console.error('Failed to load settings:', e);
     }
@@ -143,6 +167,9 @@ export const useAppStore = defineStore('app', () => {
           minimize_to_tray: minimizeToTray.value,
           close_to_tray: closeToTray.value,
           default_server_id: defaultServerId.value,
+          notify_offline: notifyOffline.value,
+          notify_online: notifyOnline.value,
+          notify_start_failed: notifyStartFailed.value,
         }
       });
     } catch (e) {
@@ -156,18 +183,40 @@ export const useAppStore = defineStore('app', () => {
     saveSettings();
   }
 
+  // 深色模式实际生效值（供 App.vue 的 a-config-provider 联动 antd 组件主题）
+  // 历史 bug：applyTheme 只切 html.dark class，antd 的 Modal/下拉/message
+  // 全部不感知主题，dark 模式下仍是浅色，页面严重割裂。
+  const isDarkMode = ref(false);
+  let mediaQuery: MediaQueryList | null = null;
+  let mediaHandler: ((e: MediaQueryListEvent) => void) | null = null;
+
   function applyTheme(t: 'light' | 'dark' | 'auto') {
     const root = document.documentElement;
+    // 清理旧的监听
+    if (mediaQuery && mediaHandler) {
+      mediaQuery.removeEventListener('change', mediaHandler);
+      mediaHandler = null;
+    }
     if (t === 'auto') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      root.classList.toggle('dark', prefersDark);
+      mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      root.classList.toggle('dark', mediaQuery.matches);
+      isDarkMode.value = mediaQuery.matches;
+      mediaHandler = (e: MediaQueryListEvent) => {
+        if (theme.value === 'auto') {
+          root.classList.toggle('dark', e.matches);
+          isDarkMode.value = e.matches;
+        }
+      };
+      mediaQuery.addEventListener('change', mediaHandler);
     } else {
       root.classList.toggle('dark', t === 'dark');
+      isDarkMode.value = t === 'dark';
     }
   }
 
   function setLanguage(lang: 'zh-CN' | 'en-US') {
     language.value = lang;
+    setLocale(lang);
     saveSettings();
   }
 
@@ -308,11 +357,14 @@ export const useAppStore = defineStore('app', () => {
   /// 构建完整 FrpConfig（前后端契约：snake_case，严格对齐后端 Rust FrpConfig）
   /// start / restart 共用，消除此前 restart 用 camelCase 导致 serde 静默丢字段的 bug
   function buildServerConfig(server: any, serverProxies: any[]) {
+    // N4：multiuser 插件字段（frps 端 user + meta_token 多用户鉴权）
+    const meta: Record<string, string> = {};
+    if (server.metaToken) meta.meta_token = String(server.metaToken);
     return {
       // 必填：服务器地址与端口
       server_addr: String(server.serverAddr ?? ''),
       server_port: Number(server.serverPort ?? 7000),
-      user: null,
+      user: server.user ? String(server.user) : null,
       // 认证：generate_toml 从 auth.method/auth.token 读取
       auth: {
         method: server.token ? 'token' : 'none',
@@ -329,7 +381,7 @@ export const useAppStore = defineStore('app', () => {
       admin: { addr: '127.0.0.1', port: 7400, user: 'admin', password: 'admin' },
       transport: {},
       web_server: { addr: '127.0.0.1', port: 0, user: null, password: null },
-      metadatas: null,
+      metadatas: Object.keys(meta).length ? meta : null,
       login_fail_exit: false,
       udp_packet_size: 1500,
       // 端口统一字符串化（后端 Option<String>），null 保 null 不转 "null"
@@ -345,38 +397,65 @@ export const useAppStore = defineStore('app', () => {
   async function startServer(serverId: string) {
     const server = servers.value.find(s => s.id === serverId);
     if (!server) throw new Error('服务器不存在');
+    if (pendingOps.value.has(serverId)) return; // 防连点
 
     const serverProxies = proxies.value.filter(p => p.server_id === serverId);
     const config = buildServerConfig(server, serverProxies);
 
-    await invoke('start_server', { serverId, config });
-    frpcStartedAt.value = Date.now();
-    addLog({ timestamp: Date.now(), level: 'info', message: `服务器 "${server.name}" 已启动`, source: 'app' });
-    await refreshServerStatus(serverId);
+    setPending(serverId, 'starting');
+    try {
+      await invoke('start_server', { serverId, config });
+      frpcStartedAt.value = Date.now();
+      addLog({ timestamp: Date.now(), level: 'info', message: `服务器 "${server.name}" 已启动`, source: 'app' });
+      await refreshServerStatus(serverId);
+    } catch (e) {
+      // 启动失败桌面通知（N1）
+      if (notifyStartFailed.value) {
+        invoke('send_notification', {
+          title: 'FRP 启动失败',
+          body: `服务器「${server.name}」启动失败：${String(e)}`,
+        }).catch(() => {});
+      }
+      throw e;
+    } finally {
+      setPending(serverId, null);
+    }
   }
 
   async function stopServer(serverId: string) {
     const server = servers.value.find(s => s.id === serverId);
-    await invoke('stop_server', { serverId });
-    frpcStartedAt.value = null;
-    if (server) {
-      addLog({ timestamp: Date.now(), level: 'info', message: `服务器 "${server.name}" 已停止`, source: 'app' });
+    if (pendingOps.value.has(serverId)) return; // 防连点
+    setPending(serverId, 'stopping');
+    try {
+      await invoke('stop_server', { serverId });
+      frpcStartedAt.value = null;
+      if (server) {
+        addLog({ timestamp: Date.now(), level: 'info', message: `服务器 "${server.name}" 已停止`, source: 'app' });
+      }
+      await refreshServerStatus(serverId);
+    } finally {
+      setPending(serverId, null);
     }
-    await refreshServerStatus(serverId);
   }
 
   async function restartServer(serverId: string) {
     const server = servers.value.find(s => s.id === serverId);
     if (!server) throw new Error('服务器不存在');
+    if (pendingOps.value.has(serverId)) return; // 防连点
 
     const serverProxies = proxies.value.filter(p => p.server_id === serverId);
     // 复用 buildServerConfig —— 与 start 完全一致（修复 camelCase 契约断裂）
     const config = buildServerConfig(server, serverProxies);
 
-    await invoke('restart_server', { serverId, config });
-    frpcStartedAt.value = Date.now();
-    addLog({ timestamp: Date.now(), level: 'info', message: `服务器 "${server.name}" 已重启`, source: 'app' });
-    await refreshServerStatus(serverId);
+    setPending(serverId, 'restarting');
+    try {
+      await invoke('restart_server', { serverId, config });
+      frpcStartedAt.value = Date.now();
+      addLog({ timestamp: Date.now(), level: 'info', message: `服务器 "${server.name}" 已重启`, source: 'app' });
+      await refreshServerStatus(serverId);
+    } finally {
+      setPending(serverId, null);
+    }
   }
 
   async function refreshServerStatus(serverId?: string) {
@@ -410,7 +489,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       const statuses = await invoke<any[]>('get_all_proxy_status');
 
-      // 状态变化检测：对比新旧快照，向后端持久化连接/断开事件
+      // 状态变化检测：对比新旧快照，向后端持久化连接/断开事件 + 桌面通知（N1）
       const prev = proxyStatuses.value;
       for (const s of statuses) {
         const key = `${s.server_id}-${s.name}`;
@@ -428,6 +507,19 @@ export const useAppStore = defineStore('app', () => {
               message: s.err_msg ?? null,
               durationSecs: null,
             }).catch(err => console.warn('[monitor] 记录连接事件失败:', err));
+            // 桌面通知（首次快照 old.state 可能为 undefined，不通知，避免启动刷屏）
+            const serverName = servers.value.find(sv => sv.id === s.server_id)?.name || s.server_id;
+            if (s.state === 'offline' && old.state === 'online' && notifyOffline.value) {
+              invoke('send_notification', {
+                title: `代理掉线：${s.name}`,
+                body: `服务器「${serverName}」的代理 ${s.name} 已断开连接`,
+              }).catch(() => {});
+            } else if (s.state === 'online' && old.state === 'offline' && notifyOnline.value) {
+              invoke('send_notification', {
+                title: `代理恢复：${s.name}`,
+                body: `服务器「${serverName}」的代理 ${s.name} 已重新上线`,
+              }).catch(() => {});
+            }
           }
         }
       }
@@ -445,15 +537,23 @@ export const useAppStore = defineStore('app', () => {
         // 触发响应式：用新 Map 替换（ref<Map> 的 .set() 不会通知 computed 重算）
         serverTraffic.value = new Map(serverTraffic.value).set(serverId, traffic);
       } else {
-        // 刷新所有服务器的流量（整体替换保证响应式）
+        // 并行刷新所有服务器的流量（历史性能：for...await 串行，N 台服务器 N 倍延迟）
+        const results = await Promise.allSettled(
+          servers.value.map(async (server) => {
+            try {
+              const traffic = await invoke('get_server_traffic', { serverId: server.id });
+              return [server.id, traffic] as const;
+            } catch (e) {
+              // 后端已保证未运行时返回零值，这里只可能是真实异常；静默降级不刷屏
+              console.warn(`[traffic] server ${server.id} 获取失败:`, e);
+              return null;
+            }
+          }),
+        );
         const next = new Map(serverTraffic.value);
-        for (const server of servers.value) {
-          try {
-            const traffic = await invoke('get_server_traffic', { serverId: server.id });
-            next.set(server.id, traffic);
-          } catch (e) {
-            // 后端已保证未运行时返回零值，这里只可能是真实异常；静默降级不刷屏
-            console.warn(`[traffic] server ${server.id} 获取失败:`, e);
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value) {
+            next.set(r.value[0], r.value[1]);
           }
         }
         serverTraffic.value = next;
@@ -762,21 +862,37 @@ export const useAppStore = defineStore('app', () => {
         proxies.value = data.proxies || [];
       }
     } catch (e) {
+      // D1：静默吞错 → 冒泡到 UI（logs 页可见 + toast 提醒）
       console.error('Failed to load persistent data:', e);
+      addLog({ timestamp: Date.now(), level: 'error', message: `⚠️ 加载本地数据失败：${String(e)}`, source: 'app' });
+      message.warning('加载本地数据失败，配置可能不完整');
+    } finally {
+      dataReady.value = true;
     }
   }
 
   // ===== 初始化 =====
   let statusTimer: ReturnType<typeof setInterval> | null = null;
-  
+  let pollBusy = false;
+
   function init() {
     applyTheme(theme.value);
+    setLocale(language.value);
     if (statusTimer === null) {
-      statusTimer = setInterval(() => {
-        refreshProcessStatus();
-        refreshServerStatus(); // 刷新所有服务器状态
-        refreshProxyStatus();  // 刷新代理状态
-        refreshServerTraffic(); // 刷新流量统计
+      statusTimer = setInterval(async () => {
+        // 防堆积：上一轮未完成时跳过本轮（弱网/后端慢时轮询不再指数叠加）
+        if (pollBusy) return;
+        pollBusy = true;
+        try {
+          await Promise.allSettled([
+            refreshProcessStatus(),
+            refreshServerStatus(),
+            refreshProxyStatus(),
+            refreshServerTraffic(),
+          ]);
+        } finally {
+          pollBusy = false;
+        }
       }, 5000);
     }
     loadSettings();
@@ -798,15 +914,18 @@ export const useAppStore = defineStore('app', () => {
     // State
     theme, language,
     autoStart, minimizeToTray, closeToTray, defaultServerId,
+    notifyOffline, notifyOnline, notifyStartFailed,
+    pendingOps,
     frpConfig, processStatus, logs, frpcLogContent, autoScrollLogs,
     servers, proxies, versions, downloadedVersions, localPorts, mirrors,
     serverStatuses,
     proxyStatuses,
     serverTraffic,
+    dataReady,
     // Getters
-    isRunning, frpcStartedAt, liveLogs, appendLiveLog, clearLiveLogs, loadRecentLogsFromDisk, runningServersCount, activeProxies, activeProxiesCount,
+    isRunning, frpcStartedAt, liveLogs, appendLiveLog, clearLiveLogs, loadRecentLogsFromDisk, runningServersCount, activeProxies, activeProxiesCount, isDarkMode,
     // Settings
-    setTheme, setLanguage, loadSettings, saveSettings,
+    setTheme, setLanguage, loadSettings, saveSettings, applyTheme,
     setDefaultServerId,
     // Config
     loadConfig, saveConfig, resetAllConfig, importTomlConfig,
@@ -818,6 +937,7 @@ export const useAppStore = defineStore('app', () => {
     // Monitoring
     refreshProxyStatus, refreshServerTraffic, getProxyStatus, getServerTraffic, formatTraffic,
     loadTrafficHistory, loadConnectionHistory, restartServerIfRunning,
+    trafficHistory, connectionHistory,
     // Persistence
     savePersistentData, loadPersistentData,
     // Process

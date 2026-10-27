@@ -160,6 +160,14 @@ pub fn run() {
             commands::kill_all_frpc_on_exit,
             commands::exit_app,
             commands::open_devtools,
+            commands::send_notification,
+            // N7 HTTP 请求检查器
+            commands::inspector_start,
+            commands::inspector_stop,
+            commands::inspector_status,
+            commands::inspector_list,
+            commands::inspector_clear,
+            commands::inspector_replay,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
