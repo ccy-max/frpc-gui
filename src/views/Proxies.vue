@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAppStore } from '@/stores/app';
+import ProxyEdit from '@/views/ProxyEdit.vue';
 import { PlusOutlined, AppstoreOutlined, GlobalOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ArrowUpOutlined, ArrowDownOutlined, MoreOutlined, CopyOutlined, BarsOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined, ApiOutlined, CloudServerOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 
@@ -10,23 +11,12 @@ const searchKeyword = ref(localStorage.getItem('proxySearch') || '');
 const serverFilter = ref<string>(localStorage.getItem('proxyServerFilter') || '');
 watch(searchKeyword, v => localStorage.setItem('proxySearch', v));
 watch(serverFilter, v => localStorage.setItem('proxyServerFilter', v));
-const modalVisible = ref(false);
-const editingName = ref<string | null>(null);
+// 页内子页面模式（替代弹窗）
+const editMode = ref(false);
+const editingProxy = ref<any | null>(null);
 const selectedProxies = ref<Set<string>>(new Set()); // 批量选择
 const batchActionVisible = ref(false); // 批量操作工具栏
 
-const form = ref<any>({
-  name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 8080,
-  remote_port: 8080, server_id: '', enabled: true,
-  bandwidth_limit: '', traffic_limit: 0,
-  custom_domains: [] as string[], subdomain: '', locations: [] as string[],
-  http_user: '', http_password: '', host_header_rewrite: '',
-  secret_key: '', allow_users: [] as string[],
-  health_check_type: undefined as 'tcp' | 'http' | undefined,
-  health_check_interval_s: 10, health_check_timeout_s: 3,
-  health_check_max_unhealthy_times: 3, health_check_path: '/health',
-  use_encryption: false, use_compression: false,
-});
 
 const proxyTypes = [
   { value: 'tcp', label: 'TCP' }, { value: 'udp', label: 'UDP' },
@@ -169,86 +159,22 @@ onMounted(() => window.addEventListener('open-add-proxy', onOpenAddProxy));
 onUnmounted(() => window.removeEventListener('open-add-proxy', onOpenAddProxy));
 
 function openAdd() {
-  modalVisible.value = true;
-  editingName.value = null;
-  // 优先使用默认服务器，其次使用活动服务器
-  form.value = {
-    name: '', type: 'tcp', local_ip: '127.0.0.1', local_port: 8080,
-    remote_port: 8080,
-    server_id: appStore.defaultServerId || activeServerId.value || null,
-    enabled: true,
-    bandwidth_limit: '', traffic_limit: 0,
-    custom_domains: [], subdomain: '', locations: [],
-    http_user: '', http_password: '', host_header_rewrite: '',
-    secret_key: '', allow_users: [], health_check_type: undefined,
-    health_check_interval_s: 10, health_check_timeout_s: 3,
-    health_check_max_unhealthy_times: 3, health_check_path: '/health',
-    use_encryption: false, use_compression: false,
-  };
+  editingProxy.value = null;
+  editMode.value = true;
 }
 
 function openEdit(proxy: any) {
-  modalVisible.value = true;  editingName.value = proxy.name;
-  form.value = { ...proxy };
+  editingProxy.value = { ...proxy };
+  editMode.value = true;
 }
 
-async function handleSave() {
-  // 验证名称
-  if (!form.value.name) { 
-    message.warning('请输入代理名称'); 
-    return; 
-  }
-  
-  // 验证名称是否重复（编辑时排除自己）
-  const nameExists = appStore.proxies.some(p => 
-    p.name === form.value.name && p.name !== editingName.value
-  );
-  if (nameExists) {
-    message.error(`代理名称 "${form.value.name}" 已存在，请使用其他名称`);
-    return;
-  }
-  
-  // 验证端口范围
-  if (form.value.local_port < 1 || form.value.local_port > 65535) {
-    message.error('本地端口必须在 1-65535 之间');
-    return;
-  }
-  if (form.value.remote_port < 1 || form.value.remote_port > 65535) {
-    message.error('远程端口必须在 1-65535 之间');
-    return;
-  }
-  
-  // 验证 IP 地址格式
-  const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-  if (!ipRegex.test(form.value.local_ip)) {
-    message.error('请输入有效的 IP 地址格式');
-    return;
-  }
-  
-  // 验证 HTTP 代理的域名
-  if (isHttpType.value && form.value.custom_domains && form.value.custom_domains.length > 0) {
-    const domainRegex = /^[a-zA-Z0-9][-a-zA-Z0-9]*(\.[a-zA-Z0-9][-a-zA-Z0-9]*)*$/;
-    for (const domain of form.value.custom_domains) {
-      if (!domainRegex.test(domain)) {
-        message.error(`无效的域名格式：${domain}`);
-        return;
-      }
-    }
-  }
-  
-  // 验证 STCP 的密钥
-  if (isStcpType.value && !form.value.secret_key) {
-    message.warning('STCP/XTCP 类型建议设置共享密钥以提高安全性');
-  }
-  
-  if (editingName.value) {
-    await appStore.updateProxy(editingName.value, form.value);
-    message.success('保存成功');
-  } else {
-    await appStore.addProxy(form.value);
-    message.success('添加成功');
-  }
-  modalVisible.value = false;
+function closeEdit() {
+  editMode.value = false;
+  editingProxy.value = null;
+}
+
+function onProxySaved() {
+  closeEdit();
 }
 
 function handleDelete(proxy: any) {
@@ -268,14 +194,13 @@ function handleDelete(proxy: any) {
 
 // B2x：复制代理——预填表单，名称自动加 -copy 后缀
 function handleCopy(proxy: any) {
-  editingName.value = null;
   let copyName = `${proxy.name}-copy`;
   let i = 2;
   while (appStore.proxies.some(p => p.name === copyName)) {
     copyName = `${proxy.name}-copy${i++}`;
   }
-  form.value = { ...JSON.parse(JSON.stringify(proxy)), name: copyName };
-  modalVisible.value = true;
+  editingProxy.value = { ...JSON.parse(JSON.stringify(proxy)), name: copyName };
+  editMode.value = true;
 }
 
 async function toggleProxy(proxy: any) {
@@ -370,8 +295,6 @@ async function handleBatchDelete() {
   });
 }
 
-const isHttpType = computed(() => ['http', 'https'].includes(form.value.type));
-const isStcpType = computed(() => ['stcp', 'xtcp', 'sudp'].includes(form.value.type));
 
 // ===== 监控功能 =====
 // 获取代理状态
@@ -452,7 +375,17 @@ const selectAllChecked = computed({
 </script>
 
 <template>
-  <div class="page-container">
+  <!-- 编辑/新建：页内子页面（替代弹窗） -->
+  <ProxyEdit
+    v-if="editMode"
+    :proxy="editingProxy"
+    :default-server-id="appStore.defaultServerId || activeServerId || ''"
+    @close="closeEdit"
+    @saved="onProxySaved"
+  />
+
+  <!-- 列表视图 -->
+  <div v-else class="page-container">
     <div class="page-header">
       <h1 class="page-title">
         <AppstoreOutlined class="header-icon" />
@@ -742,167 +675,6 @@ const selectAllChecked = computed({
     </a-modal>
 
     <!-- 编辑/添加对话框 -->
-    <a-modal
-      v-model:open="modalVisible"
-      :title="editingName ? '编辑代理' : '添加代理'"
-      @ok="handleSave"
-      width="900px"
-    >
-      <a-form :model="form" layout="vertical">
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="名称" required>
-              <a-input v-model:value="form.name" placeholder="请输入代理名称" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="类型" required>
-              <a-select v-model:value="form.type">
-                <a-select-option v-for="t in proxyTypes" :key="t.value" :value="t.value">
-                  {{ t.label }}
-                </a-select-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-        </a-row>
-
-        <!-- 服务器关联 -->
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="所属服务器">
-              <a-select v-model:value="form.server_id" placeholder="选择关联的服务器" allow-clear>
-                <a-select-option
-                  v-for="server in appStore.servers"
-                  :key="server.id"
-                  :value="server.id"
-                >
-                  {{ server.name }} ({{ server.serverAddr }})
-                </a-select-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="启用">
-              <a-switch v-model:checked="form.enabled" />
-            </a-form-item>
-          </a-col>
-        </a-row>
-
-        <a-row :gutter="16">
-          <a-col :span="8">
-            <a-form-item label="本地 IP">
-              <a-input v-model:value="form.local_ip" placeholder="127.0.0.1" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
-            <a-form-item label="本地端口">
-              <a-input-number v-model:value="form.local_port" :min="1" :max="65535" style="width: 100%" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
-            <a-form-item label="远程端口">
-              <a-input-number v-model:value="form.remote_port" :min="1" :max="65535" style="width: 100%" />
-            </a-form-item>
-          </a-col>
-        </a-row>
-
-        <template v-if="isHttpType">
-          <a-divider orientation="left">HTTP/HTTPS 配置</a-divider>
-          <a-form-item label="自定义域名">
-            <a-select v-model:value="form.custom_domains" mode="tags" style="width: 100%" />
-          </a-form-item>
-          <a-row :gutter="16">
-            <a-col :span="12">
-              <a-form-item label="子域名">
-                <a-input v-model:value="form.subdomain" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="12">
-              <a-form-item label="Host 重写">
-                <a-input v-model:value="form.host_header_rewrite" />
-              </a-form-item>
-            </a-col>
-          </a-row>
-          <a-row :gutter="16">
-            <a-col :span="12">
-              <a-form-item label="HTTP 用户">
-                <a-input v-model:value="form.http_user" />
-              </a-form-item>
-            </a-col>
-            <a-col :span="12">
-              <a-form-item label="HTTP 密码">
-                <a-input-password v-model:value="form.http_password" />
-              </a-form-item>
-            </a-col>
-          </a-row>
-        </template>
-
-        <template v-if="isStcpType">
-          <a-divider orientation="left">STCP/XTCP 配置</a-divider>
-          <a-form-item label="共享密钥">
-            <a-input-password v-model:value="form.secret_key" />
-          </a-form-item>
-          <a-form-item label="允许访问者">
-            <a-select v-model:value="form.allow_users" mode="tags" style="width: 100%" />
-          </a-form-item>
-        </template>
-
-        <a-divider orientation="left">健康检查</a-divider>
-        <a-row :gutter="16">
-          <a-col :span="8">
-            <a-form-item label="检查类型">
-              <a-select v-model:value="form.health_check_type" allow-clear>
-                <a-select-option value="tcp">TCP</a-select-option>
-                <a-select-option value="http">HTTP</a-select-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="8" v-if="form.health_check_type === 'http'">
-            <a-form-item label="检查路径">
-              <a-input v-model:value="form.health_check_path" />
-            </a-form-item>
-          </a-col>
-        </a-row>
-        <a-row :gutter="16" v-if="form.health_check_type">
-          <a-col :span="6">
-            <a-form-item label="间隔 (秒)">
-              <a-input-number v-model:value="form.health_check_interval_s" :min="1" style="width: 100%" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="6">
-            <a-form-item label="超时 (秒)">
-              <a-input-number v-model:value="form.health_check_timeout_s" :min="1" style="width: 100%" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="6">
-            <a-form-item label="最大失败次数">
-              <a-input-number v-model:value="form.health_check_max_unhealthy_times" :min="1" style="width: 100%" />
-            </a-form-item>
-          </a-col>
-        </a-row>
-
-        <a-divider orientation="left">其他选项</a-divider>
-        <a-row :gutter="16">
-          <a-col :span="8">
-            <a-form-item label="带宽限制">
-              <a-input v-model:value="form.bandwidth_limit" placeholder="例：1MB" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
-            <a-form-item label="流量限制 (MB)">
-              <a-input-number v-model:value="form.traffic_limit" :min="0" style="width: 100%" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
-            <a-space>
-              <a-checkbox v-model:checked="form.use_encryption">启用加密</a-checkbox>
-              <a-checkbox v-model:checked="form.use_compression">启用压缩</a-checkbox>
-            </a-space>
-          </a-col>
-        </a-row>
-      </a-form>
-    </a-modal>
-
     <!-- 批量修改服务器对话框 -->
     <a-modal
       v-model:open="batchServerModalVisible"

@@ -1,51 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAppStore } from '@/stores/app';
+import ServerEdit from '@/views/ServerEdit.vue';
 import { PlusOutlined, CloudServerOutlined, CheckCircleOutlined, PlayCircleOutlined, PauseCircleOutlined, ReloadOutlined, LoadingOutlined, CopyOutlined, EditOutlined, DeleteOutlined, StarOutlined } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
-import type { FormInstance, Rule } from 'ant-design-vue/es/form';
 
 const appStore = useAppStore();
 
 const searchKeyword = ref(localStorage.getItem('serverSearch') || '');
 watch(searchKeyword, v => localStorage.setItem('serverSearch', v));
-const modalVisible = ref(false);
-const editingId = ref<string | null>(null);
-const formRef = ref<FormInstance>();
-const saving = ref(false);
-const form = ref<any>({
-  id: '', name: '', serverAddr: '', serverPort: 7000, token: '', tlsEnable: false, enabled: true,
-  user: '', metaToken: '',
-});
-
-// A2 表单校验：字段级 rules，错误定位到具体输入框
-const serverRules: Record<string, Rule[]> = {
-  name: [
-    { required: true, message: '请输入服务器名称', trigger: 'blur' },
-    {
-      validator: async (_r: Rule, value: string) => {
-        const dup = appStore.servers.some(s => s.name === value && s.id !== editingId.value);
-        if (dup) throw new Error('该名称已存在');
-      },
-      trigger: 'blur',
-    },
-  ],
-  serverAddr: [
-    { required: true, message: '请输入服务器地址', trigger: 'blur' },
-    {
-      validator: async (_r: Rule, value: string) => {
-        if (!value) return;
-        const ipOk = /^(\d{1,3}\.){3}\d{1,3}$/.test(value);
-        const domainOk = /^[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}$/.test(value);
-        if (!ipOk && !domainOk) throw new Error('请输入合法的 IPv4 地址或域名');
-      },
-      trigger: 'blur',
-    },
-  ],
-  serverPort: [
-    { required: true, type: 'number', min: 1, max: 65535, message: '端口范围 1-65535', trigger: 'blur' },
-  ],
-};
+// 页内子页面模式（替代弹窗）：null = 列表，对象 = 编辑，'new' = 新建
+const editingServer = ref<any | null>(null);
+const editMode = ref(false);
 
 const filteredServers = computed(() => {
   if (!searchKeyword.value.trim()) return appStore.servers;
@@ -106,10 +72,8 @@ async function restartServer(server: any) {
 }
 
 function openAdd() {
-  editingId.value = null;
-  form.value = { id: Date.now().toString(), name: '', serverAddr: '', serverPort: 7000, token: '', tlsEnable: false, enabled: true };
-  modalVisible.value = true;
-  formRef.value?.clearValidate();
+  editingServer.value = null;
+  editMode.value = true;
 }
 
 // B1x：命令面板"新建服务器"入口
@@ -118,26 +82,17 @@ onMounted(() => window.addEventListener('open-add-server', onOpenAddServer));
 onUnmounted(() => window.removeEventListener('open-add-server', onOpenAddServer));
 
 function openEdit(server: any) {
-  editingId.value = server.id;
-  form.value = { ...server };
-  modalVisible.value = true;
-  formRef.value?.clearValidate();
+  editingServer.value = { ...server };
+  editMode.value = true;
 }
 
-function handleSave() {
-  // A2：走 a-form rules 校验，错误定位到字段
-  formRef.value?.validate().then(() => {
-    if (editingId.value) {
-      appStore.updateServer(editingId.value, form.value);
-      message.success('保存成功');
-    } else {
-      appStore.addServer(form.value);
-      message.success('添加成功');
-    }
-    modalVisible.value = false;
-  }).catch(() => {
-    // 校验失败：字段已内联标红，无需额外提示
-  });
+function closeEdit() {
+  editMode.value = false;
+  editingServer.value = null;
+}
+
+function onSaved() {
+  closeEdit();
 }
 
 // B4x：复制服务器地址
@@ -199,7 +154,16 @@ async function setActiveServer(server: any) {
 </script>
 
 <template>
-  <div class="page-container">
+  <!-- 编辑/新建：页内子页面（替代弹窗） -->
+  <ServerEdit
+    v-if="editMode"
+    :server="editingServer"
+    @close="closeEdit"
+    @saved="onSaved"
+  />
+
+  <!-- 列表视图 -->
+  <div v-else class="page-container">
     <div class="page-header">
       <h1 class="page-title">
         <CloudServerOutlined class="header-icon" />
@@ -342,40 +306,6 @@ async function setActiveServer(server: any) {
       </div>
     </div>
 
-    <a-modal
-      v-model:open="modalVisible"
-      :title="editingId ? '编辑服务器' : '添加服务器'"
-      @ok="handleSave"
-      width="600px"
-    >
-      <a-form ref="formRef" :model="form" :rules="serverRules" layout="vertical">
-        <a-form-item label="名称" name="name">
-          <a-input v-model:value="form.name" placeholder="请输入服务器名称" />
-        </a-form-item>
-        <a-form-item label="服务器地址" name="serverAddr">
-          <a-input v-model:value="form.serverAddr" placeholder="例如：127.0.0.1 或 frp.example.com" />
-        </a-form-item>
-        <a-form-item label="端口" name="serverPort">
-          <a-input-number v-model:value="form.serverPort" :min="1" :max="65535" style="width: 100%" />
-        </a-form-item>
-        <a-form-item label="令牌">
-          <a-input-password v-model:value="form.token" placeholder="请输入令牌" />
-        </a-form-item>
-        <a-form-item label="用户名（multiuser 插件）">
-          <a-input v-model:value="form.user" placeholder="可选：frps 启用 multiuser 插件时填写" />
-        </a-form-item>
-        <a-form-item label="meta_token（multiuser 插件）">
-          <a-input-password v-model:value="form.metaToken" placeholder="可选：与 user 配套使用" />
-          <div class="form-help">frps 端启用 multiuser 插件时，user + meta_token 用于多用户鉴权</div>
-        </a-form-item>
-        <a-form-item label="启用 TLS">
-          <a-switch v-model:checked="form.tlsEnable" />
-        </a-form-item>
-        <a-form-item label="启用">
-          <a-switch v-model:checked="form.enabled" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
   </div>
 </template>
 
