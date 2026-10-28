@@ -6,7 +6,6 @@ import enUS from 'ant-design-vue/es/locale/en_US';
 import { useAppStore } from '@/stores/app';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { confirm } from '@tauri-apps/plugin-dialog';
 
 const appStore = useAppStore();
 
@@ -56,21 +55,50 @@ onMounted(async () => {
     appStore.loadConfig().catch(console.error);
   }, 100);
 
-  // 拦截窗口关闭按钮：弹选择对话框
-  // 后端 CloseRequested 事件已阻止默认关闭，等前端决定
+  // 拦截窗口关闭按钮：弹三选项对话框（停止并退出 / 最小化到托盘 / 取消）
+  //
+  // 历史 bug：原实现用 confirm()（仅"确定/取消"两按钮），语义含糊 ——
+  //   点"取消"或对话框的 × → 什么都不做，但后端 close_shown 标志已被置 true，
+  //   下次再点关闭按钮会直接放行 → 窗口关掉但 frpc 进程继续跑（残留）。
+  // 现在后端每次关闭都 prevent_close（无标志），前端用三选项明确表达意图：
+  //   Yes    = 停止 frpc 并退出
+  //   No     = 最小化到托盘（frpc 继续运行）
+  //   Cancel = 取消关闭（保持窗口，frpc 继续运行）
   await listen('window-close-requested', async () => {
-    const confirmed = await confirm(
-      '关闭时停止 FRP 进程？\n\n✓ 停止并退出\n✗ 最小化到托盘',
-      '确认退出'
-    );
-    if (confirmed) {
-      // 用户选择退出：杀 frpc + 直接退出（不调 window.close() 避免死锁）
-      await invoke('exit_app').catch(console.error);
-    } else {
-      // 用户选择最小化：保持窗口隐藏
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      getCurrentWindow().hide();
+    const { message } = await import('@tauri-apps/plugin-dialog');
+    let choice: string;
+    try {
+      choice = await message(
+        '请选择关闭方式：\n\n' +
+        '• 停止并退出 —— 终止 frpc 进程后关闭程序\n' +
+        '• 最小化到托盘 —— 程序隐藏，frpc 继续运行\n' +
+        '• 取消 —— 保持窗口打开',
+        {
+          title: '关闭 FRPC GUI',
+          kind: 'info',
+          buttons: { yes: '停止并退出', no: '最小化到托盘', cancel: '取消' },
+        },
+      );
+    } catch {
+      // 对话框异常时保守处理：不关闭窗口（避免误杀/残留）
+      return;
     }
+
+    if (choice === 'Yes') {
+      // 停止并退出：后端先杀 frpc（含孤儿）再 process::exit
+      await invoke('exit_app').catch((e) => console.error('退出失败:', e));
+    } else if (choice === 'No') {
+      // 最小化到托盘：frpc 继续运行
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().hide().catch(console.error);
+    }
+    // choice === 'Cancel'：什么都不做，窗口保持打开
+  });
+
+  // 托盘"退出"菜单：后端已同步杀掉 frpc，这里只补一个确认提示
+  // （后端 kill 后再 emit，前端弹窗只是告知，不阻塞退出）
+  await listen('app-quit-requested', () => {
+    console.info('[app] 托盘退出，frpc 进程已清理');
   });
 
   // 实时日志：监听后端 frpc-log 事件（frpc stdout → log channel → emit → 前端）
@@ -78,17 +106,6 @@ onMounted(async () => {
   await listen('frpc-log', (event) => {
     const payload = event.payload as { line: string; timestamp: number };
     appStore.appendLiveLog(payload.line, payload.timestamp);
-  });
-
-  // 托盘"退出"菜单也走同样流程
-  await listen('app-quit-requested', async () => {
-    const confirmed = await confirm(
-      '确定要退出 FRPC GUI 吗？\n\n正在运行的 FRP 进程将被终止。',
-      '确认退出'
-    );
-    if (confirmed) {
-      await invoke('exit_app').catch(console.error);
-    }
   });
 });
 

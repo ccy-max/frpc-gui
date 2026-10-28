@@ -56,7 +56,11 @@ pub fn run() {
                                 }
                             }
                             "quit" => {
-                                // 退出前清理所有 frpc 子进程（含孤儿），避免残留（S3 修复）
+                                // 托盘退出：必须"先杀 frpc 再退出"
+                                // 历史 bug：这里只 emit 事件后立刻 _app.exit(0)，
+                                // 前端根本来不及弹窗/清理，frpc 子进程全部残留。
+                                // 改为：同步杀掉所有 frpc → 通知前端（尽力） → 退出
+                                commands::kill_all_frpc_now(_app);
                                 let _ = _app.emit("app-quit-requested", ());
                                 _app.exit(0);
                             }
@@ -69,26 +73,21 @@ pub fn run() {
             }
 
             // 窗口关闭事件：通知前端弹对话框，由前端决定最小化还是退出
-            // 用 flag 防止 prevent_close + window.close() 死锁（第二次直接放行）
-            use std::sync::{Arc, Mutex};
-            let close_shown = Arc::new(Mutex::new(false));
+            //
+            // 历史 bug（重要）：原实现用一个 `close_shown` 标志，置 true 后永不复位。
+            // 用户第一次点关闭 → 弹窗；点 × 或"取消"关闭弹窗 → 标志仍是 true；
+            // 用户再点关闭 → 走 return 直接放行 → 窗口销毁但 frpc 子进程继续运行（残留）。
+            //
+            // 正确做法：不用标志。每次 CloseRequested 都 prevent_close + 通知前端，
+            // 由前端决定后续动作（exit_app 命令会先杀 frpc 再 process::exit，
+            // 不再走 window.close()，从根本上绕开 CloseRequested 死锁）。
             if let Some(window) = app.get_webview_window("main") {
                 let win = window.clone();
-                let shown = Arc::clone(&close_shown);
                 window.on_window_event(move |event| match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
-                        let mut shown_ref = shown.lock().unwrap();
-                        if *shown_ref {
-                            // 对话框已弹过，用户确认后第二次关闭 → 直接放行
-                            drop(shown_ref);
-                            return;
-                        }
-                        *shown_ref = true;
-                        drop(shown_ref);
-                        // 通知前端弹选择对话框
-                        let _ = win.emit("window-close-requested", ());
-                        // 阻止默认关闭，等前端发信号
+                        // 每次关闭都拦截，交给前端弹窗决策
                         api.prevent_close();
+                        let _ = win.emit("window-close-requested", ());
                     }
                     _ => {}
                 });

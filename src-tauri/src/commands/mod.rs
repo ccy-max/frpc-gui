@@ -1754,11 +1754,73 @@ pub async fn kill_all_frpc_on_exit(app: tauri::AppHandle, state: State<'_, AppSt
     Ok(true)
 }
 
+/// 同步杀掉所有 frpc 子进程（供托盘退出等无法 await 的场景直接调用）
+///
+/// 与 exit_app 不同，本函数不退出应用，只做进程清理。
+/// 内部复用 KillAllFrpFn 回调（含 PID 文件扫描 + taskkill /T + 兜底 IM 匹配），
+/// 因为 app.handle() 在任何线程都能拿到 AppHandle，无需访问 State。
+pub fn kill_all_frpc_now(app: &tauri::AppHandle) {
+    use log::info;
+    use std::process::Command;
+
+    info!("Cleaning up frpc subprocesses (synchronous)");
+
+    let config_dir = {
+        use tauri::Manager;
+        app.path()
+            .app_config_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("frpc-gui")
+    };
+
+    // 1. 按 PID 文件逐个杀（精确，覆盖所有服务器）
+    let servers_dir = config_dir.join("servers");
+    if let Ok(entries) = std::fs::read_dir(&servers_dir) {
+        for entry in entries.flatten() {
+            let pid_file = entry.path().join("frpc.pid");
+            if let Ok(content) = std::fs::read_to_string(&pid_file) {
+                if let Ok(pid) = content.trim().parse::<u32>() {
+                    #[cfg(windows)]
+                    {
+                        Command::new("taskkill")
+                            .args(["/F", "/T", "/PID", &pid.to_string()])
+                            .creation_flags(0x08000000)
+                            .output()
+                            .ok();
+                    }
+                    #[cfg(unix)]
+                    {
+                        Command::new("kill").args(["-9", &pid.to_string()]).output().ok();
+                    }
+                    let _ = std::fs::remove_file(&pid_file);
+                }
+            }
+        }
+    }
+
+    // 2. 兜底：清理任何残留的 frpc（含其他配置目录/孤儿进程）
+    #[cfg(windows)]
+    {
+        Command::new("taskkill")
+            .args(["/F", "/IM", "frpc.exe", "/T"])
+            .creation_flags(0x08000000)
+            .output()
+            .ok();
+    }
+    #[cfg(unix)]
+    {
+        Command::new("pkill").args(["-9", "frpc"]).output().ok();
+    }
+}
+
 /// 杀 frpc 并立即退出应用（替代 window.close()，避免 CloseRequested 死锁）
 #[tauri::command]
 pub async fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    // 优先用 State 里的回调（与初始化时同一套逻辑）
     if let Some(kill_fn) = &state.kill_all_frpc {
         kill_fn(&app);
+    } else {
+        kill_all_frpc_now(&app);
     }
     std::process::exit(0);
 }
