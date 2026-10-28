@@ -110,6 +110,17 @@ export const useAppStore = defineStore('app', () => {
   }
   const trafficHistory = ref<any[]>([]);  // 流量历史
   const connectionHistory = ref<any[]>([]);  // 连接历史
+  // 历史数据订阅者计数：统计页挂载时 +1，卸载时 -1
+  // 只有有人看时才在 5s 轮询里刷新历史（避免每轮都读盘 + IPC）
+  const trafficHistoryWatchers = ref(0);
+  function watchTrafficHistory(): () => void {
+    trafficHistoryWatchers.value++;
+    loadTrafficHistory();
+    loadConnectionHistory();
+    return () => {
+      trafficHistoryWatchers.value = Math.max(0, trafficHistoryWatchers.value - 1);
+    };
+  }
 
   // 计算属性
   // 多进程模式：任一服务器 running 即视为整体运行
@@ -890,6 +901,12 @@ export const useAppStore = defineStore('app', () => {
             refreshProxyStatus(),
             refreshServerTraffic(),
           ]);
+          // 流量/连接历史：refreshServerTraffic 内部会写入 monitoring-data.json，
+          // 但前端 trafficHistory 若只在 init 加载一次，统计页会永远空白（历史 bug）。
+          // 轮询后按需重新拉取（统计页/概览页正在使用时才刷新，避免无谓 IPC）。
+          if (trafficHistoryWatchers.value > 0) {
+            await Promise.allSettled([loadTrafficHistory(), loadConnectionHistory()]);
+          }
         } finally {
           pollBusy = false;
         }
@@ -938,6 +955,7 @@ export const useAppStore = defineStore('app', () => {
     refreshProxyStatus, refreshServerTraffic, getProxyStatus, getServerTraffic, formatTraffic,
     loadTrafficHistory, loadConnectionHistory, restartServerIfRunning,
     trafficHistory, connectionHistory,
+    watchTrafficHistory,
     // Persistence
     savePersistentData, loadPersistentData,
     // Process
