@@ -73,6 +73,13 @@ onMounted(async () => {
     }
   });
 
+  // 实时日志：监听后端 frpc-log 事件（frpc stdout → log channel → emit → 前端）
+  // 历史 bug：后端正确 emit 了 frpc-log 事件，但前端从未 listen → 实时日志永远空白
+  await listen('frpc-log', (event) => {
+    const payload = event.payload as { line: string; timestamp: number };
+    appStore.appendLiveLog(payload.line, payload.timestamp);
+  });
+
   // 托盘"退出"菜单也走同样流程
   await listen('app-quit-requested', async () => {
     const confirmed = await confirm(

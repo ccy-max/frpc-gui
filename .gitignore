@@ -58,3 +58,4 @@ frpc-gui-data.json
 # 涵盖英文/中文文件名的 TODO/报告/计划/总结等临时文档
 /*.md
 !/README.md
+V1_FIX_TODO.md

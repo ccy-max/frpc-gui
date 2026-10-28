@@ -1160,17 +1160,22 @@ pub async fn get_all_proxy_status(
             "/api/status",
         ).await {
             Ok(status) => {
-                for proxy in status.proxies {
-                    proxy_statuses.push(ProxyStatusInfo {
-                        name: proxy.proxy_name.clone(),
-                        server_id: server_id.clone(),
-                        state: proxy.status.clone(),
-                        err_msg: proxy.err.clone(),
-                        today_traffic_in: proxy.today_traffic_in,
-                        today_traffic_out: proxy.today_traffic_out,
-                        last_start_time: proxy.last_start_time,
-                        last_close_time: proxy.last_close_time,
-                    });
+                // frpc /api/status 返回 map[type][]ProxyStatusResp，展开为扁平列表
+                for (_proxy_type, proxies) in &status {
+                    for proxy in proxies {
+                        proxy_statuses.push(ProxyStatusInfo {
+                            name: proxy.name.clone(),
+                            server_id: server_id.clone(),
+                            state: proxy.status.clone(),
+                            err_msg: if proxy.err.is_empty() { None } else { Some(proxy.err.clone()) },
+                            // frpc 客户端 admin API 不提供流量数据（只在 frps 服务端有）
+                            today_traffic_in: 0,
+                            today_traffic_out: 0,
+                            last_start_time: None,
+                            last_close_time: None,
+                            remote_addr: if proxy.remote_addr.is_empty() { None } else { Some(proxy.remote_addr.clone()) },
+                        });
+                    }
                 }
             }
             Err(_e) => {
@@ -1184,6 +1189,7 @@ pub async fn get_all_proxy_status(
                     today_traffic_out: 0,
                     last_start_time: None,
                     last_close_time: None,
+                    remote_addr: None,
                 });
             }
         }
@@ -1227,56 +1233,47 @@ pub async fn get_server_traffic(
                 "/api/status",
             ).await {
                 Ok(status) => {
-                    let mut total_in = 0u64;
-                    let mut total_out = 0u64;
+                    // frpc admin API 不提供流量数据（today_traffic_in 等只在 frps 服务端有）
+                    // 这里只提取代理名称列表，流量值为 0
                     let mut proxy_traffic_list = Vec::new();
                     
-                    for proxy in status.proxies {
-                        total_in += proxy.today_traffic_in;
-                        total_out += proxy.today_traffic_out;
-                        
-                        proxy_traffic_list.push(ProxyTrafficInfo {
-                            name: proxy.proxy_name,
-                            traffic_in: proxy.today_traffic_in,
-                            traffic_out: proxy.today_traffic_out,
-                            today_traffic_in: proxy.today_traffic_in,
-                            today_traffic_out: proxy.today_traffic_out,
-                        });
+                    for (_proxy_type, proxies) in &status {
+                        for proxy in proxies {
+                            proxy_traffic_list.push(ProxyTrafficInfo {
+                                name: proxy.name.clone(),
+                                traffic_in: 0,
+                                traffic_out: 0,
+                                today_traffic_in: 0,
+                                today_traffic_out: 0,
+                            });
+                        }
                     }
                     
-                    // 持久化今日流量（使用互斥锁防止并发）
+                    // 持久化今日记录（流量为 0，但保留代理列表结构供历史页使用）
                     let _guard = MONITORING_DATA_MUTEX.lock().await;
                     
                     let today = get_today_date();
                     let mut monitoring_data = load_monitoring_data()?;
                     
-                    // 查找或创建今日记录
                     let today_record = monitoring_data.traffic_history
                         .iter_mut()
                         .find(|r| r.date == today);
                     
+                    let daily_proxies: Vec<ProxyDailyTraffic> = proxy_traffic_list.iter().map(|p| ProxyDailyTraffic {
+                        name: p.name.clone(),
+                        traffic_in: 0,
+                        traffic_out: 0,
+                    }).collect();
+                    
                     if let Some(record) = today_record {
-                        // 更新今日记录
-                        record.total_traffic_in = total_in;
-                        record.total_traffic_out = total_out;
-                        record.proxies = proxy_traffic_list.iter().map(|p| ProxyDailyTraffic {
-                            name: p.name.clone(),
-                            traffic_in: p.today_traffic_in,
-                            traffic_out: p.today_traffic_out,
-                        }).collect();
+                        record.proxies = daily_proxies;
                     } else {
-                        // 创建新记录
                         monitoring_data.traffic_history.push(TrafficHistory {
                             date: today,
-                            total_traffic_in: total_in,
-                            total_traffic_out: total_out,
-                            proxies: proxy_traffic_list.iter().map(|p| ProxyDailyTraffic {
-                                name: p.name.clone(),
-                                traffic_in: p.today_traffic_in,
-                                traffic_out: p.today_traffic_out,
-                            }).collect(),
+                            total_traffic_in: 0,
+                            total_traffic_out: 0,
+                            proxies: daily_proxies,
                         });
-                        // 只保留最近 30 天
                         if monitoring_data.traffic_history.len() > 30 {
                             monitoring_data.traffic_history.remove(0);
                         }
@@ -1285,14 +1282,12 @@ pub async fn get_server_traffic(
                     monitoring_data.last_updated = chrono::Utc::now().timestamp();
                     save_monitoring_data(&monitoring_data)?;
                     
-                    // 锁在这里自动释放
-                    
                     Ok(TrafficStatistics {
                         server_id,
-                        total_traffic_in: total_in,
-                        total_traffic_out: total_out,
-                        today_traffic_in: total_in,
-                        today_traffic_out: total_out,
+                        total_traffic_in: 0,
+                        total_traffic_out: 0,
+                        today_traffic_in: 0,
+                        today_traffic_out: 0,
                         proxies: proxy_traffic_list,
                     })
                 }
@@ -1443,10 +1438,13 @@ pub struct ProxyStatusInfo {
     pub server_id: String,
     pub state: String,  // online, offline, starting
     pub err_msg: Option<String>,
-    pub today_traffic_in: u64,  // 今日下载流量 (bytes)
-    pub today_traffic_out: u64, // 今日上传流量 (bytes)
+    pub today_traffic_in: u64,  // frpc admin API 不提供，始终为 0
+    pub today_traffic_out: u64, // frpc admin API 不提供，始终为 0
     pub last_start_time: Option<i64>,
     pub last_close_time: Option<i64>,
+    /// 代理映射的远程地址（frpc admin API 提供，如 "1.2.3.4:10022"）
+    #[serde(default)]
+    pub remote_addr: Option<String>,
 }
 
 /// 流量统计信息
@@ -1524,26 +1522,23 @@ impl MonitoringData {
     }
 }
 
-/// Admin API 响应结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdminStatusResponse {
-    pub proxies: Vec<AdminProxyStatus>,
-}
+/// frpc Admin API /api/status 响应结构
+/// frpc 返回 map[type][]ProxyStatusResp（按代理类型分组），不是 { proxies: [...] }
+/// frpc 客户端 admin API 不提供流量/时间字段（today_traffic_in 等只在 frps 服务端有）
+pub type AdminStatusResponse = std::collections::HashMap<String, Vec<AdminProxyStatus>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminProxyStatus {
-    #[serde(rename = "name")]
-    pub proxy_name: String,
-    pub conf_name: String,
+    pub name: String,
+    /// frpc JSON 字段名是 "type"（Rust 关键字，用 rename 映射）
     #[serde(rename = "type")]
     pub proxy_type: String,
-    pub status: String,  // "online" or "offline"
-    pub err: Option<String>,
-    pub today_traffic_in: u64,
-    pub today_traffic_out: u64,
-    pub cur_conns: u32,
-    pub last_start_time: Option<i64>,
-    pub last_close_time: Option<i64>,
+    pub status: String,  // "online" / "offline" / "starting" 等
+    pub err: String,     // frpc 返回空字符串而非 null
+    #[serde(default)]
+    pub local_addr: String,
+    #[serde(default)]
+    pub remote_addr: String,
 }
 
 // ==================== 工具函数 ====================

@@ -103,8 +103,8 @@ const proxyRequests = computed(() => {
       name: p.name,
       type: (p.type || 'tcp').toUpperCase(),
       online: ps?.state === 'online',
-      trafficIn: ps?.today_traffic_in || 0,
-      trafficOut: ps?.today_traffic_out || 0,
+      // frpc admin API 不提供流量数据，改显示代理映射的远程地址
+      remoteAddr: ps?.remote_addr || '—',
     };
   });
 });
@@ -290,16 +290,11 @@ onUnmounted(() => {
           <span class="proxy-state" :class="{ 'state-online': item.online, 'state-offline': !item.online }">
             {{ item.online ? 'online' : 'offline' }}
           </span>
-          <span class="proxy-traffic">
-            <ArrowDownOutlined /> {{ formatBytes(item.trafficIn) }}
-            <ArrowUpOutlined /> {{ formatBytes(item.trafficOut) }}
-          </span>
+          <span class="proxy-addr" :title="item.remoteAddr">{{ item.remoteAddr }}</span>
         </div>
       </div>
       <div v-if="proxyRequests.length > 0" class="traffic-summary">
-        <span>总流量：</span>
-        <span class="traffic-item"><ArrowDownOutlined /> {{ formatBytes(totalTraffic.in) }}</span>
-        <span class="traffic-item"><ArrowUpOutlined /> {{ formatBytes(totalTraffic.out) }}</span>
+        <span style="color: #8c8c8c;">💡 流量统计需 frps 服务端 Dashboard 支持，frpc 客户端暂不提供</span>
       </div>
     </a-card>
     </template>
@@ -352,7 +347,7 @@ onUnmounted(() => {
 .proxy-state { min-width: 60px; font-size: 12px; }
 .state-online { color: #52c41a; }
 .state-offline { color: #8c8c8c; }
-.proxy-traffic { margin-left: auto; color: #595959; display: flex; align-items: center; gap: 6px; }
+.proxy-addr { margin-left: auto; color: #595959; font-size: 12px; font-family: monospace; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .traffic-summary {
   display: flex; align-items: center; gap: 16px;
   padding: 8px 12px; border-top: 2px solid #f0f0f0;

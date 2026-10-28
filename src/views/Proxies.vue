@@ -96,7 +96,7 @@ const listColumns = [
   { title: '服务器', key: 'server', width: 120 },
   { title: '状态', key: 'state', width: 110 },
   { title: '地址映射', key: 'addr', width: 220 },
-  { title: '今日流量', key: 'traffic', width: 160 },
+  { title: '映射地址', key: 'traffic', width: 160 },
   { title: '操作', key: 'action', width: 240 },
 ];
 
@@ -423,6 +423,13 @@ function getProxyTodayTrafficIn(proxy: any): number {
   return status?.today_traffic_in || 0;
 }
 
+// 获取代理映射的远程地址（frpc admin API 提供，替代不支持的流量显示）
+function getProxyRemoteAddr(proxy: any): string {
+  const sid = proxy.server_id || appStore.defaultServerId || appStore.servers[0]?.id || '';
+  const status = appStore.getProxyStatus(sid, proxy.name);
+  return status?.remote_addr || '—';
+}
+
 // 格式化流量显示
 function formatTraffic(bytes: number): string {
   return appStore.formatTraffic(bytes);
@@ -606,16 +613,10 @@ const selectAllChecked = computed({
             <span class="info-value">:{{ proxy.remote_port }}</span>
           </div>
           
-          <!-- 今日流量 -->
+          <!-- 映射地址（frpc admin API 提供，替代不支持的流量） -->
           <div class="proxy-info-row">
-            <span class="info-label">流量：</span>
-            <span class="info-value traffic-text">
-              <ArrowUpOutlined style="color: #52c41a; font-size: 12px;" />
-              {{ formatTraffic(getProxyTodayTrafficOut(proxy)) }}
-              &nbsp;
-              <ArrowDownOutlined style="color: #1890ff; font-size: 12px;" />
-              {{ formatTraffic(getProxyTodayTrafficIn(proxy)) }}
-            </span>
+            <span class="info-label">映射地址：</span>
+            <span class="info-value traffic-text">{{ getProxyRemoteAddr(proxy) }}</span>
           </div>
           
           <!-- 其他信息 -->
@@ -685,7 +686,7 @@ const selectAllChecked = computed({
           <span class="mono">{{ record.local_ip }}:{{ record.local_port }} → :{{ record.remote_port }}</span>
         </template>
         <template v-else-if="column.key === 'traffic'">
-          <span class="mono">↑{{ formatTraffic(getProxyTodayTrafficOut(record)) }} ↓{{ formatTraffic(getProxyTodayTrafficIn(record)) }}</span>
+          <span class="mono">{{ getProxyRemoteAddr(record) }}</span>
         </template>
         <template v-else-if="column.key === 'action'">
           <a-space>

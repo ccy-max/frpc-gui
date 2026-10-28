@@ -144,6 +144,13 @@ watch(() => [appStore.trafficHistory.length, appStore.isDarkMode], () => renderA
     <a-row :gutter="16">
       <a-col :xs="24" :lg="16">
         <a-card title="流量趋势（近 30 天）" class="chart-card">
+          <a-alert
+            v-if="appStore.trafficHistory.length"
+            type="info"
+            show-icon
+            message="frpc 客户端不提供流量数据，图表可能显示为零。流量统计需 frps 服务端 Dashboard 支持。"
+            style="margin-bottom: 12px;"
+          />
           <div ref="trendRef" class="chart-box" style="height: 320px;"></div>
           <a-empty v-if="!appStore.trafficHistory.length" description="暂无流量历史数据（启动 FRP 运行后自动记录）" />
         </a-card>

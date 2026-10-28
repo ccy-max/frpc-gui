@@ -25,13 +25,10 @@ const router = useRouter();
 const route = useRoute();
 const { t } = useI18n();
 
-// C4：侧边栏可折叠（窄窗口自动折叠为图标模式）
-const collapsed = ref(window.innerWidth < 1100);
-function onWindowResize() {
-  collapsed.value = window.innerWidth < 1100;
-}
-onMounted(() => window.addEventListener('resize', onWindowResize));
-onUnmounted(() => window.removeEventListener('resize', onWindowResize));
+// C4：侧边栏可折叠（窄窗口初始折叠为图标模式，之后完全由用户手动控制）
+// 历史 bug：onWindowResize 在每次 resize 时强制覆盖 collapsed 值，
+// 用户手动展开后任何 resize 事件都会覆盖回去 → "收起后无法展开"
+const collapsed = ref(window.innerWidth < 1000);
 
 const activeMenu = ref('dashboard');
 
