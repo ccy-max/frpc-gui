@@ -375,17 +375,20 @@ const selectAllChecked = computed({
 </script>
 
 <template>
-  <!-- 编辑/新建：页内子页面（替代弹窗） -->
-  <ProxyEdit
-    v-if="editMode"
-    :proxy="editingProxy"
-    :default-server-id="appStore.defaultServerId || activeServerId || ''"
-    @close="closeEdit"
-    @saved="onProxySaved"
-  />
+  <!-- 必须单根节点：App.vue 用 <transition> 包裹路由组件，
+       transition 要求单一根元素，多根会导致渲染异常（头部丢头） -->
+  <div class="view-root">
+    <!-- 编辑/新建：页内子页面（替代弹窗） -->
+    <ProxyEdit
+      v-if="editMode"
+      :proxy="editingProxy"
+      :default-server-id="appStore.defaultServerId || activeServerId || ''"
+      @close="closeEdit"
+      @saved="onProxySaved"
+    />
 
-  <!-- 列表视图 -->
-  <div v-else class="page-container">
+    <!-- 列表视图 -->
+    <div v-else class="page-container">
     <div class="page-header">
       <h1 class="page-title">
         <AppstoreOutlined class="header-icon" />
@@ -697,10 +700,17 @@ const selectAllChecked = computed({
         </a-form-item>
       </a-form>
     </a-modal>
+    </div>
   </div>
 </template>
 
 <style scoped lang="scss">
+/* 路由视图根容器（配合 App.vue 的 <transition> 单根要求） */
+.view-root {
+  height: 100%;
+  min-height: 0;
+}
+
 .page-container {
   padding: 24px;
 }

@@ -126,9 +126,8 @@ onMounted(resetForm);
         {{ isEdit ? '保存修改' : '添加服务器' }}
       </a-button>
     </template>
-  </SubPageHeader>
 
-  <div class="form-wrap">
+    <div class="form-wrap">
     <a-form ref="formRef" :model="form" :rules="rules" layout="vertical">
       <div class="form-section">
         <div class="section-title">基础信息</div>
@@ -188,8 +187,9 @@ onMounted(resetForm);
           <a-switch v-model:checked="form.enabled" />
         </div>
       </div>
-    </a-form>
-  </div>
+      </a-form>
+    </div>
+  </SubPageHeader>
 </template>
 
 <style scoped>

@@ -168,9 +168,8 @@ const typeHint = computed(() => typeHints[form.value.type] || '');
         {{ isEdit ? '保存修改' : '添加代理' }}
       </a-button>
     </template>
-  </SubPageHeader>
 
-  <div class="form-wrap">
+    <div class="form-wrap">
     <a-form :model="form" layout="vertical">
       <!-- 基础信息 -->
       <div class="form-section">
@@ -370,8 +369,9 @@ const typeHint = computed(() => typeHints[form.value.type] || '');
           <a-switch v-model:checked="form.enabled" />
         </div>
       </div>
-    </a-form>
-  </div>
+      </a-form>
+    </div>
+  </SubPageHeader>
 </template>
 
 <style scoped>
