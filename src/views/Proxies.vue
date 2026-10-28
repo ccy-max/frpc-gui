@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAppStore } from '@/stores/app';
-import { PlusOutlined, AppstoreOutlined, GlobalOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ArrowUpOutlined, ArrowDownOutlined, MoreOutlined, CopyOutlined, BarsOutlined } from '@ant-design/icons-vue';
+import { PlusOutlined, AppstoreOutlined, GlobalOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, ArrowUpOutlined, ArrowDownOutlined, MoreOutlined, CopyOutlined, BarsOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined, ApiOutlined, CloudServerOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 
 const appStore = useAppStore();
@@ -522,133 +522,140 @@ const selectAllChecked = computed({
 
     <!-- 空状态 -->
     <div v-if="filteredProxies.length === 0" class="empty-state">
-      <a-empty description="暂无代理配置">
-        <template #description>
-          <div class="empty-guide">
-            <p style="margin-bottom: 16px; font-size: 14px; color: #64748b;">
-              暂无代理配置
-            </p>
-            <a-button type="primary" @click="openAdd">
-              <template #icon><PlusOutlined /></template>
-              添加第一个代理
-            </a-button>
-            <p v-if="appStore.servers.length === 0" class="help-text" style="margin-top: 12px; font-size: 13px;">
-              💡 提示：建议先添加服务器，再添加代理
-            </p>
-            <p v-else-if="!appStore.defaultServerId" class="help-text" style="margin-top: 12px; font-size: 13px;">
-              💡 提示：可在设置中配置默认服务器，新建代理时自动关联
-            </p>
-          </div>
-        </template>
-      </a-empty>
+      <div class="empty-card">
+        <div class="empty-icon">
+          <ApiOutlined />
+        </div>
+        <h3 class="empty-title">
+          {{ searchKeyword || serverFilter ? '没有匹配的代理' : '还没有代理配置' }}
+        </h3>
+        <p class="empty-desc">
+          <template v-if="searchKeyword || serverFilter">
+            调整搜索或筛选条件后再试
+          </template>
+          <template v-else-if="appStore.servers.length === 0">
+            请先添加服务器，再创建代理规则
+          </template>
+          <template v-else>
+            把本地端口映射到公网，支持 TCP/UDP/HTTP 等 8 种类型
+          </template>
+        </p>
+        <a-button v-if="appStore.servers.length === 0" type="primary" size="large" @click="$router.push('/servers')">
+          <template #icon><CloudServerOutlined /></template>
+          先去添加服务器
+        </a-button>
+        <a-button v-else-if="searchKeyword || serverFilter" @click="searchKeyword = ''; serverFilter = ''">
+          清空筛选
+        </a-button>
+        <a-button v-else type="primary" size="large" @click="openAdd">
+          <template #icon><PlusOutlined /></template>
+          添加第一个代理
+        </a-button>
+        <p v-if="appStore.servers.length > 0 && !appStore.defaultServerId" class="empty-hint">
+          可在设置中配置默认服务器，新建代理时自动关联
+        </p>
+      </div>
     </div>
 
     <!-- 代理卡片网格（N5：card 视图）-->
     <div v-else-if="viewMode === 'card'" class="proxy-grid">
-      <div 
-        v-for="proxy in visibleProxies" 
+      <div
+        v-for="proxy in visibleProxies"
         :key="proxy.name"
-        class="proxy-card-wrapper"
-        :class="{ 'proxy-selected': selectedProxies.has(proxy.name) }"
+        class="proxy-card"
+        :class="{
+          'is-online': isProxyOnline(proxy),
+          'is-selected': selectedProxies.has(proxy.name),
+          'is-disabled': !proxy.enabled,
+        }"
+        @click.stop="toggleSelect(proxy.name)"
       >
-        <a-checkbox 
+        <!-- 选中复选框（hover / 选中时显示） -->
+        <a-checkbox
           class="proxy-checkbox"
           :checked="selectedProxies.has(proxy.name)"
           @click.stop="toggleSelect(proxy.name)"
         />
-        <a-card
-          class="proxy-card"
-          :class="{ 'proxy-card-enabled': proxy.enabled }"
-          hoverable
-          @click.stop="toggleSelect(proxy.name)"
-        >
-        <template #title>
-          <div class="proxy-card-title">
-            <span class="proxy-name">
+
+        <!-- 头部：图标 + 名称 + 类型 -->
+        <div class="card-head">
+          <div class="head-left">
+            <span class="type-icon" :class="`type-${proxy.type}`">
               <ThunderboltOutlined v-if="['stcp', 'xtcp', 'sudp'].includes(proxy.type)" />
               <GlobalOutlined v-else-if="['http', 'https'].includes(proxy.type)" />
               <AppstoreOutlined v-else />
-              {{ proxy.name }}
             </span>
-            <a-tag :color="getProxyTypeColor(proxy.type)">
+            <span class="proxy-name" :title="proxy.name">{{ proxy.name }}</span>
+          </div>
+          <div class="head-right">
+            <a-tag :color="getProxyTypeColor(proxy.type)" class="type-tag">
               {{ proxy.type.toUpperCase() }}
             </a-tag>
-          </div>
-        </template>
-
-        <div class="proxy-card-content">
-          <!-- 关联服务器 -->
-          <div class="proxy-info-row">
-            <span class="info-label">服务器：</span>
-            <span class="info-value server-name">
-              <a-tag :color="proxy.server_id ? 'blue' : 'default'" size="small">
-                {{ getServerName(proxy.server_id) }}
-              </a-tag>
-            </span>
-          </div>
-          
-          <!-- 连接状态 -->
-          <div class="proxy-info-row">
-            <span class="info-label">状态：</span>
-            <span class="info-value">
-              <a-tag :color="getProxyStateColor(proxy)" size="small">
-                <template #icon>
-                  <CheckCircleOutlined v-if="isProxyOnline(proxy)" />
-                  <CloseCircleOutlined v-else />
-                </template>
-                {{ getProxyStateText(proxy) }}
-              </a-tag>
-            </span>
-          </div>
-          
-          <!-- 本地地址 -->
-          <div class="proxy-info-row">
-            <span class="info-label">本地：</span>
-            <span class="info-value">{{ proxy.local_ip }}:{{ proxy.local_port }}</span>
-          </div>
-          
-          <!-- 远程端口 -->
-          <div class="proxy-info-row">
-            <span class="info-label">远程：</span>
-            <span class="info-value">:{{ proxy.remote_port }}</span>
-          </div>
-          
-          <!-- 映射地址（frpc admin API 提供，替代不支持的流量） -->
-          <div class="proxy-info-row">
-            <span class="info-label">映射地址：</span>
-            <span class="info-value traffic-text">{{ getProxyRemoteAddr(proxy) }}</span>
-          </div>
-          
-          <!-- 其他信息 -->
-          <div v-if="proxy.bandwidth_limit" class="proxy-info-row">
-            <span class="info-label">带宽：</span>
-            <span class="info-value">{{ proxy.bandwidth_limit }}</span>
-          </div>
-          
-          <div v-if="proxy.traffic_limit > 0" class="proxy-info-row">
-            <span class="info-label">流量：</span>
-            <span class="info-value">{{ proxy.traffic_limit }} MB</span>
+            <span class="status-led" :class="{ on: isProxyOnline(proxy) }"></span>
           </div>
         </div>
 
-        <template #actions>
-          <a @click="toggleProxy(proxy)">{{ proxy.enabled ? '停止' : '启动' }}</a>
-          <a @click="openEdit(proxy)">编辑</a>
-          <a-dropdown>
-            <a @click="(e: MouseEvent) => e.preventDefault()"><MoreOutlined /> 更多</a>
-            <template #overlay>
-              <a-menu>
-                <a-menu-item key="copy" @click="handleCopy(proxy)">
-                  <CopyOutlined /> 复制为新代理
-                </a-menu-item>
-                <a-menu-item key="delete" @click="handleDelete(proxy)">
-                  <span style="color: #ef4444;">删除「{{ proxy.name }}」</span>
-                </a-menu-item>
-              </a-menu>
+        <!-- 映射关系：本地 → 远程 -->
+        <div class="mapping-line">
+          <span class="map-side local">{{ proxy.local_ip }}:{{ proxy.local_port }}</span>
+          <span class="map-arrow">→</span>
+          <span class="map-side remote">:{{ proxy.remote_port }}</span>
+        </div>
+
+        <!-- 属性标签 -->
+        <div class="meta-row">
+          <span class="meta-chip">{{ getServerName(proxy.server_id) }}</span>
+          <span class="meta-chip" :class="isProxyOnline(proxy) ? 'chip-online' : 'chip-offline'">
+            {{ getProxyStateText(proxy) }}
+          </span>
+          <span
+            v-if="getProxyRemoteAddr(proxy) !== '—'"
+            class="meta-chip mono"
+            :title="getProxyRemoteAddr(proxy)"
+          >{{ getProxyRemoteAddr(proxy) }}</span>
+          <span v-if="proxy.bandwidth_limit" class="meta-chip">限速 {{ proxy.bandwidth_limit }}</span>
+          <span v-if="proxy.traffic_limit > 0" class="meta-chip">限额 {{ proxy.traffic_limit }}M</span>
+        </div>
+
+        <!-- 操作区 -->
+        <div class="card-actions" @click.stop>
+          <a-button
+            size="small"
+            :type="proxy.enabled ? 'default' : 'primary'"
+            :danger="proxy.enabled"
+            class="act-btn"
+            @click="toggleProxy(proxy)"
+          >
+            <template #icon>
+              <PauseCircleOutlined v-if="proxy.enabled" />
+              <PlayCircleOutlined v-else />
             </template>
-          </a-dropdown>
-        </template>
-      </a-card>
+            {{ proxy.enabled ? '停止' : '启动' }}
+          </a-button>
+          <a-button size="small" class="act-btn" @click="openEdit(proxy)">
+            <template #icon><EditOutlined /></template>编辑
+          </a-button>
+
+          <span class="actions-spacer"></span>
+
+          <a-tooltip title="复制为新代理">
+            <a-button size="small" type="text" class="icon-btn" @click="handleCopy(proxy)">
+              <template #icon><CopyOutlined /></template>
+            </a-button>
+          </a-tooltip>
+          <a-popconfirm
+            :title="`确定删除代理「${proxy.name}」？`"
+            ok-text="删除"
+            ok-type="danger"
+            @confirm="handleDelete(proxy)"
+          >
+            <a-tooltip title="删除">
+              <a-button size="small" type="text" danger class="icon-btn">
+                <template #icon><DeleteOutlined /></template>
+              </a-button>
+            </a-tooltip>
+          </a-popconfirm>
+        </div>
       </div>
     </div>
 
@@ -1015,115 +1022,329 @@ const selectAllChecked = computed({
   }
 }
 
-.proxy-card-wrapper {
-  position: relative;
-  padding-left: 36px;
-  transition: all 0.3s ease;
-  
-  &.proxy-selected {
-    .proxy-card {
-      border: 2px solid #667eea;
-      box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
-    }
-  }
-  
-  .proxy-checkbox {
-    position: absolute;
-    left: 8px;
-    top: 16px;
-    z-index: 10;
-  }
-}
-
+/* 空状态 */
 .empty-state {
-  margin: 48px 0;
+  margin: 40px 0;
+  display: flex;
+  justify-content: center;
 }
 
+.empty-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 40px 32px;
+  background: #fff;
+  border: 1px dashed #dbe3ee;
+  border-radius: 16px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  .empty-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    color: #7c3aed;
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(37, 99, 235, 0.08));
+    margin-bottom: 16px;
+  }
+
+  .empty-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1e293b;
+    margin: 0 0 6px;
+  }
+
+  .empty-desc {
+    font-size: 13px;
+    color: #94a3b8;
+    margin: 0 0 20px;
+    line-height: 1.6;
+  }
+
+  .empty-hint {
+    font-size: 12px;
+    color: #cbd5e1;
+    margin: 14px 0 0;
+  }
+}
+
+/* ===== 代理卡片（紧凑风格，与服务页一致）===== */
 .proxy-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 20px;
+  // 固定最大宽度，避免单卡片被拉伸铺满整行
+  grid-template-columns: repeat(auto-fill, minmax(280px, 340px));
+  gap: 14px;
+  align-items: start;
 }
 
 .proxy-card {
-  border-radius: 12px;
-  transition: all 0.3s ease;
   position: relative;
-  overflow: hidden;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #eef2f7;
+  padding: 14px 16px 12px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 
   &:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    border-color: #dbeafe;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+    transform: translateY(-2px);
+
+    .proxy-checkbox { opacity: 1; }
   }
 
-  &.proxy-card-enabled {
-    border: 2px solid #52c41a;
-    box-shadow: 0 4px 16px rgba(82, 196, 26, 0.2);
+  // 在线：绿色描边 + 浅绿渐变
+  &.is-online {
+    border-color: rgba(34, 197, 94, 0.35);
+    background: linear-gradient(180deg, rgba(240, 253, 244, 0.65) 0%, #fff 44%);
   }
 
-  .proxy-card-title {
+  // 选中：蓝色描边
+  &.is-selected {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.16);
+  }
+
+  // 已禁用代理：整体降饱和
+  &.is-disabled {
+    .card-head .proxy-name,
+    .mapping-line { opacity: 0.55; }
+  }
+
+  // 选中复选框
+  .proxy-checkbox {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 2;
+  }
+  &.is-selected .proxy-checkbox { opacity: 1; }
+
+  /* 头部 */
+  .card-head {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-right: 22px; // 给复选框留位
+
+    .head-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .type-icon {
+      width: 26px;
+      height: 26px;
+      flex-shrink: 0;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      background: rgba(37, 99, 235, 0.09);
+      color: #2563eb;
+
+      &.type-stcp, &.type-xtcp, &.type-sudp {
+        background: rgba(124, 58, 237, 0.1);
+        color: #7c3aed;
+      }
+      &.type-http, &.type-https {
+        background: rgba(16, 185, 129, 0.1);
+        color: #10b981;
+      }
+    }
 
     .proxy-name {
-      font-size: 16px;
+      font-size: 14px;
       font-weight: 600;
-      color: #1e293b;
+      color: #0f172a;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .head-right {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .type-tag {
+      margin: 0;
+      font-size: 10px;
+      line-height: 17px;
+      padding: 0 6px;
+      border-radius: 5px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .status-led {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #cbd5e1;
+
+      &.on {
+        background: #22c55e;
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.16);
+      }
     }
   }
 
-  .proxy-card-content {
-    .proxy-info-row {
-      margin-bottom: 10px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+  /* 映射关系：本地 → 远程 */
+  .mapping-line {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 10px;
+    background: #f8fafc;
+    border-radius: 8px;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 12px;
+    overflow: hidden;
 
-      .info-label {
-        font-weight: 500;
-        color: #64748b;
-        min-width: 50px;
+    .map-side {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+
+      &.local { color: #475569; flex: 1; min-width: 0; }
+      &.remote { color: #2563eb; font-weight: 600; flex-shrink: 0; }
+    }
+
+    .map-arrow {
+      color: #cbd5e1;
+      flex-shrink: 0;
+      font-size: 11px;
+    }
+  }
+
+  /* 属性标签 */
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+
+    .meta-chip {
+      font-size: 11px;
+      line-height: 20px;
+      padding: 0 7px;
+      border-radius: 5px;
+      background: #f1f5f9;
+      color: #475569;
+      white-space: nowrap;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+
+      &.chip-online {
+        background: rgba(34, 197, 94, 0.1);
+        color: #16a34a;
       }
-
-      .info-value {
-        color: #1e293b;
-        
-        &.server-name {
-          flex: 1;
-        }
-        
-        &.traffic-text {
-          font-size: 13px;
-          font-family: 'Courier New', monospace;
-          color: #475569;
-        }
+      &.chip-offline {
+        background: #f8fafc;
+        color: #94a3b8;
+      }
+      &.mono {
+        font-family: ui-monospace, monospace;
+        color: #7c3aed;
+        background: rgba(124, 58, 237, 0.07);
       }
     }
   }
 
-  :deep(.ant-card-actions) {
-    li {
-      a {
-        color: #8b5cf6;
-        transition: all 0.2s;
+  /* 操作区 */
+  .card-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-top: 9px;
+    border-top: 1px solid #f1f5f9;
 
-        &:hover {
-          color: #7c3aed;
-        }
+    .actions-spacer { flex: 1; }
 
-        &.text-danger {
-          color: #ef4444;
+    .act-btn {
+      border-radius: 7px;
+      font-size: 12px;
+      height: 27px;
+      padding: 0 10px;
+    }
 
-          &:hover {
-            color: #dc2626;
-          }
-        }
+    .icon-btn {
+      width: 27px;
+      height: 27px;
+      padding: 0;
+      border-radius: 7px;
+      color: #94a3b8;
+
+      &:hover {
+        color: #2563eb;
+        background: rgba(37, 99, 235, 0.08);
+      }
+      &.ant-btn-dangerous:hover {
+        color: #ef4444;
+        background: rgba(239, 68, 68, 0.08);
       }
     }
+  }
+}
+
+/* 深色模式 */
+html.dark .empty-card {
+  background: #1e293b;
+  border-color: #334155;
+
+  .empty-title { color: #e2e8f0; }
+  .empty-desc { color: #64748b; }
+  .empty-hint { color: #475569; }
+}
+
+html.dark {
+  .proxy-card {
+    background: #1e293b;
+    border-color: #334155;
+
+    &:hover {
+      border-color: #3b82f6;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+    &.is-online {
+      border-color: rgba(34, 197, 94, 0.3);
+      background: linear-gradient(180deg, rgba(34, 197, 94, 0.07) 0%, #1e293b 44%);
+    }
+    &.is-selected {
+      border-color: #818cf8;
+      box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.2);
+    }
+
+    .card-head .proxy-name { color: #e2e8f0; }
+    .mapping-line { background: #0f172a; }
+    .mapping-line .map-side.local { color: #cbd5e1; }
+    .mapping-line .map-side.remote { color: #60a5fa; }
+    .meta-row .meta-chip { background: #0f172a; color: #94a3b8; }
+    .meta-row .meta-chip.chip-online {
+      background: rgba(34, 197, 94, 0.14);
+      color: #4ade80;
+    }
+    .card-actions { border-top-color: #334155; }
   }
 }
 
