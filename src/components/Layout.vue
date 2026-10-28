@@ -25,10 +25,28 @@ const router = useRouter();
 const route = useRoute();
 const { t } = useI18n();
 
-// C4：侧边栏可折叠（窄窗口初始折叠为图标模式，之后完全由用户手动控制）
+// C4：侧边栏可折叠（初次按窗口宽度决定，之后由用户手动控制并持久化）
 // 历史 bug：onWindowResize 在每次 resize 时强制覆盖 collapsed 值，
 // 用户手动展开后任何 resize 事件都会覆盖回去 → "收起后无法展开"
-const collapsed = ref(window.innerWidth < 1000);
+// 修复：不再监听 resize；折叠状态存 localStorage，重启后保持
+const COLLAPSE_KEY = 'siderCollapsed';
+
+function readInitialCollapsed(): boolean {
+  const saved = localStorage.getItem(COLLAPSE_KEY);
+  if (saved === '1') return true;
+  if (saved === '0') return false;
+  // 无记录时按窗口宽度决定初始状态
+  return window.innerWidth < 1000;
+}
+
+const collapsed = ref(readInitialCollapsed());
+
+function toggleSider() {
+  collapsed.value = !collapsed.value;
+  localStorage.setItem(COLLAPSE_KEY, collapsed.value ? '1' : '0');
+  // 折叠状态变化后，antd Sider 宽度有过渡动画，稍后让内容区图表自适应
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 260);
+}
 
 const activeMenu = ref('dashboard');
 
@@ -192,8 +210,19 @@ onUnmounted(() => {
       </a-menu>
 
       <!-- 底部状态 -->
-      <div class="sider-footer">
-        <div class="status-card">
+      <div class="sider-footer" :class="{ 'is-collapsed': collapsed }">
+        <!-- 折叠态：只显示一个状态圆点（避免文字竖排挤压） -->
+        <a-tooltip v-if="collapsed" placement="right">
+          <template #title>
+            {{ appStore.isRunning ? '运行中' : '已停止' }} · {{ appStore.servers.length }} 台服务器 · {{ appStore.activeProxiesCount }} 个活跃代理
+          </template>
+          <div class="status-dot-only">
+            <span class="status-dot" :class="appStore.isRunning ? 'running' : 'stopped'"></span>
+          </div>
+        </a-tooltip>
+
+        <!-- 展开态：完整状态卡 -->
+        <div v-else class="status-card">
           <div class="status-indicator">
             <span class="status-dot" :class="appStore.isRunning ? 'running' : 'stopped'"></span>
             <span class="status-label">{{ appStore.isRunning ? '运行中' : '已停止' }}</span>
@@ -204,19 +233,58 @@ onUnmounted(() => {
             <span class="status-value">{{ appStore.activeProxiesCount }} 个活跃代理</span>
           </div>
         </div>
-        <a-button size="small" block class="sider-btn" @click="openPalette" style="margin-top: 8px;">
-          <template #icon><SearchOutlined /></template>
-          命令面板 <kbd class="kbd-hint">Ctrl K</kbd>
-        </a-button>
-        <a-button size="small" block class="sider-btn" @click="openDevtools" style="margin-top: 6px;">
-          <template #icon><BugOutlined /></template>
-          <span v-show="!collapsed">调试控制台</span>
-        </a-button>
-        <!-- C4：手动折叠切换 -->
-        <a-button size="small" block class="sider-btn" @click="collapsed = !collapsed" style="margin-top: 6px;">
-          <template #icon><MenuFoldOutlined v-if="!collapsed" /><MenuUnfoldOutlined v-else /></template>
-          <span v-show="!collapsed">收起侧栏</span>
-        </a-button>
+
+        <!-- 命令面板 -->
+        <div class="footer-btn-row">
+          <a-tooltip v-if="collapsed" placement="right" title="命令面板 (Ctrl+K)">
+            <a-button size="small" block class="sider-btn" @click="openPalette">
+              <template #icon><SearchOutlined /></template>
+            </a-button>
+          </a-tooltip>
+          <a-button v-else size="small" block class="sider-btn" @click="openPalette">
+            <template #icon><SearchOutlined /></template>
+            命令面板 <kbd class="kbd-hint">Ctrl K</kbd>
+          </a-button>
+        </div>
+
+        <!-- 调试控制台 -->
+        <div class="footer-btn-row">
+          <a-tooltip v-if="collapsed" placement="right" title="调试控制台">
+            <a-button size="small" block class="sider-btn" @click="openDevtools">
+              <template #icon><BugOutlined /></template>
+            </a-button>
+          </a-tooltip>
+          <a-button v-else size="small" block class="sider-btn" @click="openDevtools">
+            <template #icon><BugOutlined /></template>
+            调试控制台
+          </a-button>
+        </div>
+
+        <!-- C4：手动折叠切换（折叠态下"展开"按钮必须始终可见可用） -->
+        <div class="footer-btn-row">
+          <a-tooltip v-if="collapsed" placement="right" title="展开侧栏">
+            <a-button
+              size="small"
+              block
+              class="sider-btn toggle-btn"
+              aria-label="展开侧栏"
+              @click="toggleSider"
+            >
+              <template #icon><MenuUnfoldOutlined /></template>
+            </a-button>
+          </a-tooltip>
+          <a-button
+            v-else
+            size="small"
+            block
+            class="sider-btn toggle-btn"
+            aria-label="收起侧栏"
+            @click="toggleSider"
+          >
+            <template #icon><MenuFoldOutlined /></template>
+            收起侧栏
+          </a-button>
+        </div>
       </div>
     </a-layout-sider>
 
@@ -266,6 +334,14 @@ onUnmounted(() => {
   background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
   overflow: hidden;
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
+
+  // antd Sider 内部有 .ant-layout-sider-children 包裹层，
+  // 必须在这一层建立纵向 flex，否则 footer 不会固定底部、菜单也不会滚动
+  :deep(.ant-layout-sider-children) {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
   
   // Logo 区域
   .logo {
@@ -370,6 +446,53 @@ onUnmounted(() => {
     padding: 16px 20px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.02);
+    // 折叠态：收窄内边距，保证 3 个图标按钮在 72px 内完整可见
+    // （历史 bug：折叠后 padding 仍是 20px，状态卡文字竖排挤压 + 展开按钮被裁掉）
+    &.is-collapsed {
+      padding: 12px 8px;
+
+      .status-dot-only {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 24px;
+        margin-bottom: 4px;
+        cursor: default;
+      }
+
+      // 折叠态按钮：图标居中，去掉文字占位
+      :deep(.sider-btn) {
+        padding: 0 !important;
+        height: 30px !important;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        .anticon {
+          margin: 0 !important;
+          font-size: 15px;
+        }
+      }
+    }
+
+    // 折叠/展开切换按钮：折叠态下必须确保可点击（不被裁切、不被遮挡）
+    .toggle-btn {
+      position: relative;
+      z-index: 2;
+    }
+
+    // 按钮行：统一垂直间距，tooltip 包裹时保持全宽
+    .footer-btn-row {
+      margin-top: 6px;
+      width: 100%;
+
+      &:first-of-type { margin-top: 8px; }
+
+      // tooltip 包裹后内部 button 需要占满宽度
+      :deep(.ant-btn) {
+        width: 100%;
+      }
+    }
 
     .status-card {
       padding: 14px 16px;
