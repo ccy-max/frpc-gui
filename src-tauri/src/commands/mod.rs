@@ -1252,7 +1252,7 @@ pub async fn get_server_traffic(
                     // 进程级流量监控：用 Windows GetProcessIoCounters 获取 frpc 进程的
                     // 累计 I/O（读+写字节数），减去启动时记录的 baseline 得到运行期间流量。
                     // frpc 以网络 I/O 为主（本地转发），可近似为网络流量。
-                    let pid = pm.pid();
+                    let pid = pm.get_pid();
                     let current_io = crate::frp::process::get_process_io_counters(pid);
                     let baseline = pm.get_io_baseline();
                     let (traffic_in, traffic_out) = match (current_io, baseline) {

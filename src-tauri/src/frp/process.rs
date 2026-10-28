@@ -653,9 +653,10 @@ impl FrpProcessManager {
 #[cfg(windows)]
 pub fn get_process_io_counters(pid: u32) -> Option<(u64, u64)> {
     use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::IO::IO_COUNTERS;
-    use windows::Win32::System::ProcessStatus::GetProcessIoCounters;
-    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    // windows 0.58：IO_COUNTERS 和 GetProcessIoCounters 都在 Win32::System::Threading 下
+    use windows::Win32::System::Threading::{
+        GetProcessIoCounters, OpenProcess, IO_COUNTERS, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
 
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
