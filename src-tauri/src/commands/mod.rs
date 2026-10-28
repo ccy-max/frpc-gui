@@ -1233,8 +1233,8 @@ pub async fn get_server_traffic(
                 "/api/status",
             ).await {
                 Ok(status) => {
-                    // frpc admin API 不提供流量数据（today_traffic_in 等只在 frps 服务端有）
-                    // 这里只提取代理名称列表，流量值为 0
+                    // frpc admin API 不提供 per-proxy 流量数据（只在 frps 服务端有）
+                    // 这里只提取代理名称列表
                     let mut proxy_traffic_list = Vec::new();
                     
                     for (_proxy_type, proxies) in &status {
@@ -1249,7 +1249,19 @@ pub async fn get_server_traffic(
                         }
                     }
                     
-                    // 持久化今日记录（流量为 0，但保留代理列表结构供历史页使用）
+                    // 进程级流量监控：用 Windows GetProcessIoCounters 获取 frpc 进程的
+                    // 累计 I/O（读+写字节数），减去启动时记录的 baseline 得到运行期间流量。
+                    // frpc 以网络 I/O 为主（本地转发），可近似为网络流量。
+                    let pid = pm.pid();
+                    let current_io = crate::frp::process::get_process_io_counters(pid);
+                    let baseline = pm.get_io_baseline();
+                    let (traffic_in, traffic_out) = match (current_io, baseline) {
+                        (Some(cur), Some(base)) => (cur.0.saturating_sub(base.0), cur.1.saturating_sub(base.1)),
+                        (Some(cur), None) => (cur.0, cur.1),
+                        _ => (0, 0),
+                    };
+                    
+                    // 持久化今日记录
                     let _guard = MONITORING_DATA_MUTEX.lock().await;
                     
                     let today = get_today_date();
@@ -1266,12 +1278,14 @@ pub async fn get_server_traffic(
                     }).collect();
                     
                     if let Some(record) = today_record {
+                        record.total_traffic_in = traffic_in;
+                        record.total_traffic_out = traffic_out;
                         record.proxies = daily_proxies;
                     } else {
                         monitoring_data.traffic_history.push(TrafficHistory {
                             date: today,
-                            total_traffic_in: 0,
-                            total_traffic_out: 0,
+                            total_traffic_in: traffic_in,
+                            total_traffic_out: traffic_out,
                             proxies: daily_proxies,
                         });
                         if monitoring_data.traffic_history.len() > 30 {
@@ -1284,10 +1298,10 @@ pub async fn get_server_traffic(
                     
                     Ok(TrafficStatistics {
                         server_id,
-                        total_traffic_in: 0,
-                        total_traffic_out: 0,
-                        today_traffic_in: 0,
-                        today_traffic_out: 0,
+                        total_traffic_in: traffic_in,
+                        total_traffic_out: traffic_out,
+                        today_traffic_in: traffic_in,
+                        today_traffic_out: traffic_out,
                         proxies: proxy_traffic_list,
                     })
                 }

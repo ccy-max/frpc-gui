@@ -42,6 +42,9 @@ pub struct FrpProcessManager {
     admin_endpoint: std::sync::Mutex<Option<crate::frp::config::AdminConfig>>,
     /// 所属服务器 ID（实时日志事件推送时标识来源）
     server_id: std::sync::Mutex<Option<String>>,
+    /// 进程 I/O 基准（启动时记录 GetProcessIoCounters 返回值，用于计算流量差值）
+    /// (read_bytes, write_bytes)
+    io_baseline: std::sync::Mutex<Option<(u64, u64)>>,
 }
 
 impl FrpProcessManager {
@@ -62,6 +65,7 @@ impl FrpProcessManager {
             recovery_checking: Arc::new(AtomicBool::new(false)),
             admin_endpoint: std::sync::Mutex::new(None),
             server_id: std::sync::Mutex::new(None),
+            io_baseline: std::sync::Mutex::new(None),
         }
     }
 
@@ -91,6 +95,16 @@ impl FrpProcessManager {
             .unwrap_or_else(|e| e.into_inner())
             .clone()
             .unwrap_or_default()
+    }
+
+    /// 获取进程 I/O 基准（启动时记录的 GetProcessIoCounters 值）
+    pub fn get_io_baseline(&self) -> Option<(u64, u64)> {
+        *self.io_baseline.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 记录进程 I/O 基准（启动时调用）
+    pub fn set_io_baseline(&self, baseline: (u64, u64)) {
+        *self.io_baseline.lock().unwrap_or_else(|e| e.into_inner()) = Some(baseline);
     }
 
     /// 启动 FRP 进程
@@ -172,6 +186,13 @@ impl FrpProcessManager {
                 self.pid.store(pid, Ordering::SeqCst);
                 self.save_pid(pid); // 持久化 PID（应用重启后 stop 仍能找到进程）
                 *self.last_start_time.lock().unwrap_or_else(|e| e.into_inner()) = chrono::Local::now().timestamp();
+
+                // 记录进程 I/O 基准（用于流量监控：GetProcessIoCounters 返回累计值，
+                // 后续查询时用 current - baseline 得到运行期间流量）
+                if let Some(io) = get_process_io_counters(pid) {
+                    self.set_io_baseline(io);
+                    info!("Recorded I/O baseline for PID {}: read={}, write={}", pid, io.0, io.1);
+                }
 
                 // 提取 stdout/stderr
                 let stdout = child.stdout.take();
@@ -619,4 +640,35 @@ impl FrpProcessManager {
         }
         supports
     }
+}
+
+/// 获取进程的累计 I/O 读/写字节数
+///
+/// Windows: 使用 GetProcessIoCounters 获取进程级 I/O 统计。
+/// 返回的 (read_bytes, write_bytes) 包含进程的所有 I/O（网络 + 磁盘），
+/// 但 frpc 进程以网络 I/O 为主（本地转发），磁盘 I/O 仅限日志写入（量小），
+/// 因此可近似为网络流量。
+///
+/// 用法：启动时记录 baseline，查询时用 current - baseline 得到运行期间流量。
+#[cfg(windows)]
+pub fn get_process_io_counters(pid: u32) -> Option<(u64, u64)> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::IO::IO_COUNTERS;
+    use windows::Win32::System::ProcessStatus::GetProcessIoCounters;
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut counters: IO_COUNTERS = std::mem::zeroed();
+        let result = GetProcessIoCounters(handle, std::ptr::addr_of_mut!(counters));
+        let _ = CloseHandle(handle);
+        result.ok()?;
+        Some((counters.ReadTransferCount, counters.WriteTransferCount))
+    }
+}
+
+/// 非 Windows 平台：不支持进程级 I/O 监控
+#[cfg(not(windows))]
+pub fn get_process_io_counters(_pid: u32) -> Option<(u64, u64)> {
+    None
 }

@@ -294,7 +294,9 @@ onUnmounted(() => {
         </div>
       </div>
       <div v-if="proxyRequests.length > 0" class="traffic-summary">
-        <span style="color: #8c8c8c;">💡 流量统计需 frps 服务端 Dashboard 支持，frpc 客户端暂不提供</span>
+        <span>总流量（进程级监控）：</span>
+        <span class="traffic-item"><ArrowDownOutlined /> {{ formatBytes(totalTraffic.in) }}</span>
+        <span class="traffic-item"><ArrowUpOutlined /> {{ formatBytes(totalTraffic.out) }}</span>
       </div>
     </a-card>
     </template>

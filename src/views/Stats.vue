@@ -148,7 +148,7 @@ watch(() => [appStore.trafficHistory.length, appStore.isDarkMode], () => renderA
             v-if="appStore.trafficHistory.length"
             type="info"
             show-icon
-            message="frpc 客户端不提供流量数据，图表可能显示为零。流量统计需 frps 服务端 Dashboard 支持。"
+            message="流量数据通过监控 frpc 进程 I/O 获取（GetProcessIoCounters），为进程级估算值。"
             style="margin-bottom: 12px;"
           />
           <div ref="trendRef" class="chart-box" style="height: 320px;"></div>
