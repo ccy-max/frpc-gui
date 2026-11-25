@@ -33,11 +33,28 @@ FRPC GUI 是一款跨平台的 FRP 内网穿透桌面管理工具，采用 Rust 
 - ✅ **多语言支持** - 中文 / 英文
 - ✅ **主题切换** - 亮色 / 暗色 / 跟随系统
 
+### 增强功能
+- ✅ **流量统计页** - ECharts 流量趋势 / 代理 Top10 / 连接事件时间线
+- ✅ **HTTP 请求检查器** - 本地反代 + 环形缓冲 200 条 + 一键重放（对标 ngrok）
+- ✅ **命令面板** - `Ctrl/Cmd+K` 快捷跳转 / 启停服务器 / 新建 / 调试
+- ✅ **桌面通知** - 掉线 / 恢复 / 启动失败提醒（设置页可开关）
+- ✅ **批量端口创建** - TCP / UDP 连续端口一次建 N 条
+- ✅ **多用户字段** - `user` + `meta_token` 支持 frps multiuser
+- ✅ **双视图切换** - 代理卡片 / 列表视图随心切换
+- ✅ **进程级流量监控** - Windows `GetProcessIoCounters` 精确采集
+
+### 性能优化
+- 🚀 **frpc 版本缓存** - `once_cell` 缓存，切换版本失效，省 0.3~1s/次
+- 🚀 **进程内枚举** - `sysinfo` 替代 PowerShell/tasklist 子进程，省 1~3s/次
+- 🚀 **路由懒加载** - 页面独立 chunk，首屏 JS 大幅缩减
+- 🚀 **轮询并行化** - 多命令并行 + 防堆积守卫，启停乐观更新防连点
+
 ### 概览页
 - 运行状态卡片（运行中/已停止 + 运行时长）
 - 代理总数 / 活跃代理统计
 - 快捷操作（启动/停止 FRP、添加服务器、查看日志、设置）
 - 代理请求信息卡片（Admin API 轮询，5 秒自动刷新）
+- 首屏骨架屏 + 呼吸灯状态动画
 
 ### 服务器管理
 - 服务器卡片式布局
@@ -72,30 +89,36 @@ frpc-gui/
 │   ├── views/                    # 页面视图
 │   │   ├── Dashboard.vue         # 概览（状态/代理请求/快捷操作）
 │   │   ├── Servers.vue           # 服务器管理（卡片布局）
-│   │   ├── Proxies.vue           # 代理管理（多类型支持）
-│   │   ├── Versions.vue           # 版本管理（下载/切换）
-│   │   ├── Logs.vue             # 日志查看
-│   │   ├── Settings.vue         # 设置（默认服务器/主题/语言）
-│   │   └── About.vue            # 关于
+│   │   ├── ServerEdit.vue        # 服务器新建/编辑（页内页面）
+│   │   ├── Proxies.vue           # 代理管理（多类型 + 双视图）
+│   │   ├── ProxyEdit.vue         # 代理新建/编辑（页内页面）
+│   │   ├── Versions.vue          # 版本管理（下载/切换）
+│   │   ├── Logs.vue              # 日志查看（虚拟滚动）
+│   │   ├── Stats.vue             # 流量统计（ECharts 趋势/Top10/时间线）
+│   │   ├── Inspector.vue         # HTTP 请求检查器（重放）
+│   │   ├── Settings.vue          # 设置（默认服务器/主题/语言/通知）
+│   │   └── About.vue             # 关于
 │   ├── stores/                   # Pinia 状态管理
-│   │   └── app.ts               # 全局状态 + 5s 轮询
+│   │   └── app.ts                # 全局状态 + 轮询
 │   ├── types/                    # TypeScript 类型定义
-│   ├── router/                   # 路由配置
+│   ├── router/                   # 路由配置（懒加载）
 │   ├── App.vue                   # 根组件（防刷新拦截）
 │   └── main.ts                   # 入口文件
 ├── src-tauri/                    # Tauri/Rust 后端
 │   ├── src/
-│   │   ├── lib.rs               # 应用入口（退出清理/日志通道）
-│   │   ├── main.rs              # Rust main
-│   │   ├── commands/mod.rs      # Tauri 命令（start/stop/status/traffic）
-│   │   └── frp/                 # FRP 核心模块
-│   │       ├── config.rs       # 配置生成（TOML/INI 双格式）
-│   │       ├── process.rs      # 进程管理（spawn/kill/orphan清理）
-│   │       ├── download.rs     # 版本下载（镜像回退链）
-│   │       ├── admin.rs        # Admin API 客户端
-│   │       └── version.rs      # 版本检测
-│   ├── Cargo.toml               # Rust 依赖
-│   ├── tauri.conf.json          # Tauri 配置
+│   │   ├── lib.rs                # 应用入口（退出清理/日志通道）
+│   │   ├── main.rs               # Rust main
+│   │   ├── commands/mod.rs       # Tauri 命令（start/stop/status/traffic/admin）
+│   │   ├── utils/                # 工具模块
+│   │   │   ├── mod.rs
+│   │   │   └── settings.rs       # 应用设置读写
+│   │   └── frp/                  # FRP 核心模块
+│   │       ├── config.rs         # 配置生成（TOML/INI 双格式）
+│   │       ├── process.rs        # 进程管理（spawn/kill/流量/orphan清理）
+│   │       ├── download.rs       # 版本下载（镜像回退链）
+│   │       └── inspector.rs      # HTTP 请求检查器（环形缓冲/重放）
+│   ├── Cargo.toml                # Rust 依赖
+│   ├── tauri.conf.json           # Tauri 配置
 │   └── build.rs                 # 构建脚本
 ├── .github/workflows/           # GitHub Actions CI
 ├── package.json                  # Node.js 依赖
@@ -213,6 +236,16 @@ remotePort = 9090
 - ✅ **v1.0.14-v1.0.15** - CI 修复 + 启动回归修复
 - ✅ **v1.0.16** - 概览页状态同步 + 加载动画 + 日志改代理请求
 - ✅ **v1.0.17** - 代理请求信息卡片 + 右键刷新防护 + 仓库清理
+- ✅ **v1.0.18-v1.0.19** - CI 完善：exe 产物带版本号、自动创建 Release
+- ✅ **v1.0.20-v1.0.21** - 关闭窗口白屏/死锁修复，改用 `exit_app` 命令
+- ✅ **v1.0.22-v1.0.25** - 概览页代理请求卡片兼容空 `server_id`、状态与日志显示修复
+- ✅ **v1.0.26-v1.0.29** - 调试支持：devtools、F12、调试控制台按钮
+- ✅ **v1.0.30-v1.0.31** - 概览页崩溃根因修复 + 全面体检
+- ✅ **v1.1.0** - 全量增强（26 项）：性能（版本缓存/sysinfo/懒加载/轮询并行）+ UI/UX（命令面板/设计 Token/骨架屏/呼吸灯）+ 新功能（统计页/HTTP 检查器/桌面通知/批量端口/多用户/双视图/i18n）
+- ✅ **v1.1.1-v1.1.3** - 版本号同步 + Windows 进程级流量监控（`GetProcessIoCounters`）
+- ✅ **v1.1.4-v1.1.5** - 统计页刷新/空状态修复 + 关闭残留 frpc 进程修复
+- ✅ **v1.1.6-v1.1.7** - 侧边栏折叠错位修复 + 卡片紧凑风格
+- ✅ **v1.1.8-v1.1.9** - 新建/编辑改页内页面 + 子页面头部丢失修复
 
 ## 🤝 贡献指南
 
