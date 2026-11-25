@@ -388,11 +388,11 @@ impl ConfigManager {
             ini.push_str(&format!("login_fail_exit = {}\n", v));
         }
 
-        // 日志：log.to 留空 → frpc 输出到 stdout
-        // 历史 bug：此前 to 指向文件，frpc 就不再输出 stdout，
-        // 导致概览实时日志永远空白（"暂无运行日志"）。
-        // 现由应用读 stdout 后统一：emit 前端 + 写磁盘日志文件。
+        // 日志：必须显式写 to = console → frpc 输出到 stdout
+        // 历史 bug：不写 to 时 frpc 默认写 ./frpc.log（文件），stdout 静默，
+        // 管道抓不到任何日志。现由应用读 stdout 后统一：emit 前端 + 写磁盘日志文件。
         ini.push_str("\n[log]\n");
+        ini.push_str(&format!("to = {}\n", config.log.to));
         ini.push_str(&format!("level = {}\n", config.log.level));
         ini.push_str(&format!("max_days = {}\n", config.log.max_days));
 
@@ -497,11 +497,12 @@ impl ConfigManager {
 
         // ═══ 3. 日志配置（Windows 路径必须用正斜杠！ ═══
         // TOML 基本字符串中 `\U` 是 Unicode 转义前缀，
-        // 日志：log.to 留空 → frpc 输出到 stdout
-        // 历史 bug：to 指向文件导致 stdout 静默，概览实时日志永远空白。
-        // 应用读 stdout 后统一分发：emit 前端 + 写磁盘文件。
-        // （路径反斜杠转义的教训保留：若未来恢复 to 配置，必须正斜杠）
+        // 日志：必须显式写 to = "console" → frpc 输出到 stdout
+        // 历史 bug：不写 to 时 frpc 默认写 ./frpc.log（文件），stdout 静默，
+        // 管道抓不到任何日志，日志页只剩应用自己的"已启动"一条。
+        // （路径反斜杠转义的教训保留：若未来改回文件，必须正斜杠）
         toml.push_str("\n[log]\n");
+        toml.push_str(&format!("to = \"{}\"\n", config.log.to));
         toml.push_str(&format!("level = \"{}\"\n", config.log.level));
         toml.push_str(&format!("maxDays = {}\n", config.log.max_days));
 
