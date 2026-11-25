@@ -1473,13 +1473,12 @@ pub struct TrafficStatistics {
 }
 
 /// 流量历史记录（按日期）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TrafficHistory {
     pub date: String,  // YYYY-MM-DD
     pub total_traffic_in: u64,
     pub total_traffic_out: u64,
-    #[serde(default)]
-    pub proxies: Vec<serde_json::Value>,  // 保留字段兼容旧数据，不再写入
 }
 
 /// 连接状态历史
