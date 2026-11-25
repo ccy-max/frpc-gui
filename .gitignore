@@ -59,3 +59,7 @@ frpc-gui-data.json
 /*.md
 !/README.md
 V1_FIX_TODO.md
+
+# npm 本地缓存（排查环境时产生）
+.npm-cache/
+node_modules/

@@ -1218,7 +1218,6 @@ pub async fn get_server_traffic(
                     total_traffic_out: 0,
                     today_traffic_in: 0,
                     today_traffic_out: 0,
-                    proxies: Vec::new(),
                 });
             }
             
@@ -1232,77 +1231,75 @@ pub async fn get_server_traffic(
                 admin.password.as_deref().unwrap_or("admin"),
                 "/api/status",
             ).await {
-                Ok(status) => {
-                    // frpc admin API 不提供 per-proxy 流量数据（只在 frps 服务端有）
-                    // 这里只提取代理名称列表
-                    let mut proxy_traffic_list = Vec::new();
-                    
-                    for (_proxy_type, proxies) in &status {
-                        for proxy in proxies {
-                            proxy_traffic_list.push(ProxyTrafficInfo {
-                                name: proxy.name.clone(),
-                                traffic_in: 0,
-                                traffic_out: 0,
-                                today_traffic_in: 0,
-                                today_traffic_out: 0,
-                            });
-                        }
-                    }
-                    
+                Ok(_status) => {
+                    // frpc admin API 不提供 per-proxy 流量数据（只在 frps 服务端有）。
+                    // 本页只统计经过 frpc 进程的流量总量，不做代理级拆分。
                     // 进程级流量监控：用 Windows GetProcessIoCounters 获取 frpc 进程的
-                    // 累计 I/O（读+写字节数），减去启动时记录的 baseline 得到运行期间流量。
-                    // frpc 以网络 I/O 为主（本地转发），可近似为网络流量。
+                    // 累计 I/O（读+写字节数），通过对上次采样的差分累加得到真实增量。
+                    // 注意：这是进程全部读写（含日志写盘等），为网络流量的近似值。
                     let pid = pm.get_pid();
                     let current_io = crate::frp::process::get_process_io_counters(pid);
                     let baseline = pm.get_io_baseline();
-                    let (traffic_in, traffic_out) = match (current_io, baseline) {
-                        (Some(cur), Some(base)) => (cur.0.saturating_sub(base.0), cur.1.saturating_sub(base.1)),
-                        (Some(cur), None) => (cur.0, cur.1),
+                    // 本次采样的「累计值」：优先用 (当前-启动baseline)，
+                    // 首次采样用 baseline 引导，避免把进程历史 IO 全算进今天
+                    let cumulative = match (current_io, baseline) {
+                        (Some(cur), Some(base)) => (
+                            cur.0.saturating_sub(base.0),
+                            cur.1.saturating_sub(base.1),
+                        ),
                         _ => (0, 0),
                     };
-                    
+
                     // 持久化今日记录
                     let _guard = MONITORING_DATA_MUTEX.lock().await;
-                    
+
                     let today = get_today_date();
                     let mut monitoring_data = load_monitoring_data()?;
-                    
+
+                    // 差分累加：本次累计 - 上次采样累计 = 本周期真实增量
+                    // 若差分为负（进程重启导致计数器回落），取当前累计值重新起步
+                    let (delta_in, delta_out) = if cumulative.0 >= monitoring_data.last_sample_in
+                        && cumulative.1 >= monitoring_data.last_sample_out
+                    {
+                        (
+                            cumulative.0 - monitoring_data.last_sample_in,
+                            cumulative.1 - monitoring_data.last_sample_out,
+                        )
+                    } else {
+                        cumulative
+                    };
+                    monitoring_data.last_sample_in = cumulative.0;
+                    monitoring_data.last_sample_out = cumulative.1;
+
                     let today_record = monitoring_data.traffic_history
                         .iter_mut()
                         .find(|r| r.date == today);
-                    
-                    let daily_proxies: Vec<ProxyDailyTraffic> = proxy_traffic_list.iter().map(|p| ProxyDailyTraffic {
-                        name: p.name.clone(),
-                        traffic_in: 0,
-                        traffic_out: 0,
-                    }).collect();
-                    
+
                     if let Some(record) = today_record {
-                        record.total_traffic_in = traffic_in;
-                        record.total_traffic_out = traffic_out;
-                        record.proxies = daily_proxies;
+                        // 累加真实增量，而非覆盖
+                        record.total_traffic_in += delta_in;
+                        record.total_traffic_out += delta_out;
                     } else {
                         monitoring_data.traffic_history.push(TrafficHistory {
                             date: today,
-                            total_traffic_in: traffic_in,
-                            total_traffic_out: traffic_out,
-                            proxies: daily_proxies,
+                            total_traffic_in: delta_in,
+                            total_traffic_out: delta_out,
                         });
                         if monitoring_data.traffic_history.len() > 30 {
                             monitoring_data.traffic_history.remove(0);
                         }
                     }
-                    
+
                     monitoring_data.last_updated = chrono::Utc::now().timestamp();
                     save_monitoring_data(&monitoring_data)?;
-                    
+
+                    // 返回给前端的实时值：当前进程本周期累计（非当日累加）
                     Ok(TrafficStatistics {
                         server_id,
-                        total_traffic_in: traffic_in,
-                        total_traffic_out: traffic_out,
-                        today_traffic_in: traffic_in,
-                        today_traffic_out: traffic_out,
-                        proxies: proxy_traffic_list,
+                        total_traffic_in: cumulative.0,
+                        total_traffic_out: cumulative.1,
+                        today_traffic_in: cumulative.0,
+                        today_traffic_out: cumulative.1,
                     })
                 }
                 Err(_) => {
@@ -1313,7 +1310,6 @@ pub async fn get_server_traffic(
                         total_traffic_out: 0,
                         today_traffic_in: 0,
                         today_traffic_out: 0,
-                        proxies: Vec::new(),
                     })
                 }
             }
@@ -1327,7 +1323,6 @@ pub async fn get_server_traffic(
                 total_traffic_out: 0,
                 today_traffic_in: 0,
                 today_traffic_out: 0,
-                proxies: Vec::new(),
             })
         }
     }
@@ -1340,13 +1335,19 @@ pub async fn get_traffic_history(
 ) -> Result<Vec<TrafficHistory>, String> {
     let monitoring_data = load_monitoring_data()?;
     let days = days.unwrap_or(30) as usize;
-    
-    let history: Vec<TrafficHistory> = monitoring_data.traffic_history
+
+    // 按日期升序返回（最早在前），前端 X 轴直接用即为正序时间轴
+    let mut history: Vec<TrafficHistory> = monitoring_data.traffic_history;
+    history.sort_by(|a, b| a.date.cmp(&b.date));
+    let history: Vec<TrafficHistory> = history
         .into_iter()
         .rev()
         .take(days)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
         .collect();
-    
+
     Ok(history)
 }
 
@@ -1461,7 +1462,7 @@ pub struct ProxyStatusInfo {
     pub remote_addr: Option<String>,
 }
 
-/// 流量统计信息
+/// 流量统计信息（进程级总量，frpc 客户端无法按代理拆分）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrafficStatistics {
     pub server_id: String,
@@ -1469,17 +1470,6 @@ pub struct TrafficStatistics {
     pub total_traffic_out: u64,  // 总上传 (bytes)
     pub today_traffic_in: u64,   // 今日下载
     pub today_traffic_out: u64,  // 今日上传
-    pub proxies: Vec<ProxyTrafficInfo>,
-}
-
-/// 单个代理的流量信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProxyTrafficInfo {
-    pub name: String,
-    pub traffic_in: u64,
-    pub traffic_out: u64,
-    pub today_traffic_in: u64,
-    pub today_traffic_out: u64,
 }
 
 /// 流量历史记录（按日期）
@@ -1488,15 +1478,8 @@ pub struct TrafficHistory {
     pub date: String,  // YYYY-MM-DD
     pub total_traffic_in: u64,
     pub total_traffic_out: u64,
-    pub proxies: Vec<ProxyDailyTraffic>,
-}
-
-/// 代理每日流量
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProxyDailyTraffic {
-    pub name: String,
-    pub traffic_in: u64,
-    pub traffic_out: u64,
+    #[serde(default)]
+    pub proxies: Vec<serde_json::Value>,  // 保留字段兼容旧数据，不再写入
 }
 
 /// 连接状态历史
@@ -1523,6 +1506,12 @@ pub struct MonitoringData {
     pub traffic_history: Vec<TrafficHistory>,  // 最近 30 天
     pub connection_history: Vec<ConnectionHistory>,
     pub last_updated: i64,
+    /// 上次采样时的进程 IO 累计值（用于计算真实增量）
+    /// GetProcessIoCounters 返回自进程启动的累计读写，需差分才是本周期增量
+    #[serde(default)]
+    pub last_sample_in: u64,
+    #[serde(default)]
+    pub last_sample_out: u64,
 }
 
 impl MonitoringData {
@@ -1532,6 +1521,8 @@ impl MonitoringData {
             traffic_history: Vec::new(),
             connection_history: Vec::new(),
             last_updated: 0,
+            last_sample_in: 0,
+            last_sample_out: 0,
         }
     }
 }

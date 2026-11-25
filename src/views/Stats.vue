@@ -8,7 +8,7 @@
 // - 单位换算自适应（B/KB/MB/GB），避免小流量被显示成 0.00 MB
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue';
 import { useAppStore } from '@/stores/app';
-import { LineChart, BarChart } from 'echarts/charts';
+import { LineChart } from 'echarts/charts';
 import {
   GridComponent, TooltipComponent, LegendComponent, TitleComponent,
 } from 'echarts/components';
@@ -17,17 +17,15 @@ import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import {
   ClockCircleOutlined, RiseOutlined, FallOutlined, ReloadOutlined,
-  LineChartOutlined, BarChartOutlined,
+  LineChartOutlined,
 } from '@ant-design/icons-vue';
 
-use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, CanvasRenderer]);
+use([LineChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, CanvasRenderer]);
 
 const appStore = useAppStore();
 
 const trendRef = ref<HTMLElement>();
-const topRef = ref<HTMLElement>();
 let trendChart: echarts.ECharts | null = null;
-let topChart: echarts.ECharts | null = null;
 let unwatchHistory: (() => void) | null = null;
 
 // ===== 单位自适应 =====
@@ -61,21 +59,6 @@ const trendMaxBytes = computed(() => {
   }
   return m;
 });
-
-// 代理 Top10 累计（按 入+出 排序）
-const topProxies = computed(() => {
-  const acc = new Map<string, number>();
-  for (const day of appStore.trafficHistory) {
-    for (const p of (day.proxies || [])) {
-      acc.set(p.name, (acc.get(p.name) || 0) + (p.traffic_in || 0) + (p.traffic_out || 0));
-    }
-  }
-  return [...acc.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
-});
-
-const topMaxBytes = computed(() => topProxies.value[0]?.[1] ?? 0);
 
 // 汇总卡片数据
 const summary = computed(() => {
@@ -183,78 +166,11 @@ function renderTrend() {
   }, true); // notMerge：切换数据规模时避免残留旧系列
 }
 
-function renderTop() {
-  // 无代理数据：销毁画布
-  if (!topProxies.value.length || !topRef.value) {
-    topChart?.dispose();
-    topChart = null;
-    return;
-  }
-  if (!topRef.value.clientWidth) return;
-  if (!topChart) topChart = echarts.init(topRef.value);
-
-  const { unit, divisor } = pickUnit(topMaxBytes.value);
-  // 横向条形图：类目自下而上，reverse 让最大值显示在顶部
-  const items = [...topProxies.value].reverse();
-  const names = items.map(i => i[0]);
-  const values = items.map(i => +((i[1] || 0) / divisor).toFixed(2));
-
-  topChart.setOption({
-    backgroundColor: 'transparent',
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      valueFormatter: (v: number) => `${v} ${unit}`,
-    },
-    grid: { left: 8, right: 16, top: 20, bottom: 8, containLabel: true },
-    xAxis: {
-      type: 'value',
-      name: unit,
-      nameTextStyle: { color: subduedColor.value, fontSize: 11 },
-      nameGap: 8,
-      axisLabel: { color: axisColor.value, fontSize: 11 },
-      splitLine: { lineStyle: { color: splitColor.value, type: 'dashed' } },
-      axisLine: { show: false },
-      axisTick: { show: false },
-    },
-    yAxis: {
-      type: 'category',
-      data: names,
-      axisLabel: {
-        color: axisColor.value,
-        fontSize: 11,
-        width: 88,
-        overflow: 'truncate',
-      },
-      axisLine: { lineStyle: { color: splitColor.value } },
-      axisTick: { show: false },
-    },
-    series: [{
-      type: 'bar',
-      data: values,
-      itemStyle: {
-        color: 'rgba(59, 130, 246, 0.85)',
-        borderRadius: [0, 4, 4, 0],
-      },
-      barMaxWidth: 18,
-      label: {
-        show: true,
-        position: 'right',
-        color: subduedColor.value,
-        fontSize: 10,
-        formatter: (p: any) => `${p.value}`,
-      },
-    }],
-  }, true);
-}
-
 function renderAll() {
   renderTrend();
-  renderTop();
 }
 function onResize() {
   trendChart?.resize();
-  topChart?.resize();
 }
 
 // 手动刷新
@@ -283,15 +199,13 @@ onUnmounted(() => {
   window.removeEventListener('resize', onResize);
   unwatchHistory?.();
   trendChart?.dispose();
-  topChart?.dispose();
   trendChart = null;
-  topChart = null;
 });
 
 // 数据变化/主题切换重绘：用长度 + 汇总值双重触发，
 // 同一天流量增长时长度不变但数值变了，仅靠 length 不会重绘
 watch(
-  () => [historyDays.value, summary.value.total, appStore.isDarkMode, topProxies.value.length],
+  () => [historyDays.value, summary.value.total, appStore.isDarkMode],
   async () => {
     await nextTick();
     renderAll();
@@ -318,7 +232,7 @@ function fmtTime(ts: number): string {
     <div class="page-header">
       <div>
         <h1 class="page-title">📊 统计分析</h1>
-        <p class="page-subtitle">流量趋势、代理排行与连接事件（进程级监控，数据每 5 秒自动刷新）</p>
+        <p class="page-subtitle">frpc 进程流量趋势与连接事件（进程级估算，数据每 5 秒自动刷新）</p>
       </div>
       <a-button :loading="refreshing" @click="manualRefresh">
         <template #icon><ReloadOutlined /></template>
@@ -368,15 +282,15 @@ function fmtTime(ts: number): string {
     </a-row>
 
     <a-row :gutter="16">
-      <!-- 流量趋势 -->
-      <a-col :xs="24" :lg="16">
+      <!-- 流量趋势（全宽） -->
+      <a-col :span="24">
         <a-card class="chart-card" :bordered="false">
           <template #title>
             <span>流量趋势</span>
             <a-tag v-if="historyDays" color="blue" style="margin-left: 8px">近 {{ historyDays }} 天</a-tag>
           </template>
           <template #extra>
-            <a-tooltip title="通过监控 frpc 进程 I/O 获取（GetProcessIoCounters），为进程级估算值">
+            <a-tooltip title="通过监控 frpc 进程 I/O 获取（GetProcessIoCounters），统计经过本机 frpc 的全部流量。含少量进程自身读写开销，为近似值；frpc 客户端无法按单个代理拆分流量。">
               <span class="hint-link">数据说明</span>
             </a-tooltip>
           </template>
@@ -399,34 +313,6 @@ function fmtTime(ts: number): string {
               启动 FRP 并产生流量后自动记录，<br />
               数据每 5 秒刷新一次
             </div>
-          </a-empty>
-        </a-card>
-      </a-col>
-
-      <!-- 代理流量 Top 10 -->
-      <a-col :xs="24" :lg="8">
-        <a-card class="chart-card" :bordered="false">
-          <template #title>
-            <span>代理流量 Top 10</span>
-          </template>
-          <template #extra>
-            <a-tag v-if="topProxies.length" color="purple">{{ topProxies.length }} 个代理</a-tag>
-          </template>
-
-          <div v-show="topProxies.length" ref="topRef" class="chart-box"></div>
-          <div v-if="topProxies.length && topMaxBytes === 0" class="chart-overlay-hint">
-            代理流量均为 0
-            <div class="hint-sub">代理有数据传输后才会产生排行</div>
-          </div>
-          <a-empty
-            v-if="!topProxies.length"
-            class="chart-empty"
-            description="暂无代理流量数据"
-          >
-            <template #image>
-              <BarChartOutlined class="empty-icon" />
-            </template>
-            <div class="empty-hint">代理产生流量后<br />此处显示 Top 10 排行</div>
           </a-empty>
         </a-card>
       </a-col>
